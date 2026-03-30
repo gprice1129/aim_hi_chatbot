@@ -1,0 +1,5 @@
+tsconfig.tsbuildinfo
+node_modules
+build
+config/secrets
+.env*
