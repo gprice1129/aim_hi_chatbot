@@ -1,15 +1,23 @@
 {
   "name": "aim_hi_chatbot",
   "version": "1.0.0",
-  "type": "module",
   "description": "",
-  "main": "index.js",
-  "scripts": {
-    "build": "tsc",
-    "basic": "npm run build && node build/examples/basic.js"
+  "private": true,
+  "type": "module",
+  "main": "./build/chatbot.js",
+  "types": "./build/chatbot.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/chatbot.d.ts",
+      "default": "./build/chatbot.js"
+    }
   },
-  "author": "",
-  "license": "ISC",
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@types/node": "^25.5.0",

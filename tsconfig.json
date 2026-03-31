@@ -1,28 +1,11 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "allowUnreachableCode": false,
-    "alwaysStrict": true,
-    "allowUnusedLabels": false,
-    "noImplicitAny": true,
-    "noImplicitOverride": true,
-    "noImplicitThis": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "strict": true,
-    "strictFunctionTypes": true,
-    "strictNullChecks": true,
-    "forceConsistentCasingInFileNames": true,
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "noEmitOnError": true,
-    "outDir": "./build",
-    "rootDir": "./src",
-    "target": "esnext",
-    "esModuleInterop": true,
-    "skipLibCheck": true,
+    "composite": true,
     "declaration": true,
-    "sourceMap": true
+    "declarationMap": true,
+    "rootDir": "./src",
+    "outDir": "./build"
   },
-  "include": ["src/**/*"],
-  "exlcude": ["node_modules", "build"]
+  "include": ["src/**/*.ts"]
 }
