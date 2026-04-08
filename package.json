@@ -4,12 +4,12 @@
   "description": "",
   "private": true,
   "type": "module",
-  "main": "./build/chatbot.js",
-  "types": "./build/chatbot.d.ts",
+  "main": "./build/chatlib.js",
+  "types": "./build/chatlib.d.ts",
   "exports": {
     ".": {
-      "types": "./build/chatbot.d.ts",
-      "default": "./build/chatbot.js"
+      "types": "./build/chatlib.d.ts",
+      "default": "./build/chatlib.js"
     }
   },
   "files": [
@@ -22,5 +22,10 @@
     "@anthropic-ai/sdk": "^0.80.0",
     "@types/node": "^25.5.0",
     "typescript": "^6.0.2"
+  },
+  "imports": {
+    "#core/*": "./build/core/*",
+    "#model/*": "./build/model/*",
+    "#bot/*": "./build/bot/*"
   }
 }
