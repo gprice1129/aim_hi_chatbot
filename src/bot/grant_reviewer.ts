@@ -1,4 +1,8 @@
-export { make_grant_reviewer }
+export {
+  make_grant_reviewer,
+  GrantReviewMode,
+  GrantReviewContent,
+}
 
 import { APIKey } from "#core/types.js";
 import {
@@ -7,10 +11,51 @@ import {
   AnthropicModelType, } from "#model/anthropic.js";
 import { Chatbot } from "#core/bot.js";
 
+interface GrantReviewContent {
+  rfa: string;
+  proposal: string;
+}
+
+// TODO:[grant reviewer] Generalize recoverable error handling
 class GrantReviewer {
   private _bot: Chatbot
+  private _context: string | null;
   constructor(bot: Chatbot) {
     this._bot = bot;
+    this._context = null;
+  }
+  mode() {
+    return this._bot.mode_id();
+  }
+  mode_context() {
+    return this._bot.mode()?.context ?? null;
+  }
+  mode_prompt() {
+    return this._bot.mode()?.prompt ?? null;
+  }
+  set_mode(mode: GrantReviewMode): boolean {
+    const new_mode = this._bot.set_mode(mode);
+    if (false === new_mode) return false;
+    return true;
+  }
+  set_context(content: GrantReviewContent): boolean {
+    // TODO:[grant reviewer] validate content
+    const mode_context = this.mode_context();
+    if (null === mode_context) return false;
+    this._context = mode_context
+      .replace(/{rfaContent}/g, content.rfa)
+      .replace(/{proposalContent}/g, content.proposal);
+    return true;
+  }
+
+  async review(): Promise<string[] | false> {
+    const prompt = this.mode_prompt();
+    if (null === this._context) return false;
+    if (null !== prompt) {
+      this._bot.add_str_to_memory(prompt);
+    }
+    const msg = await this._bot.gen_message({system_prompt: this._context});
+    return this._bot.extract_content(msg)
   }
 }
 
@@ -26,19 +71,28 @@ function make_grant_reviewer(api_key: APIKey): GrantReviewer {
       AnthropicModelType.Opus,
       AnthropicModelEffortScale.Max,
       16384),
-    modes: GRANT_REVIEWER_MODES,
+    modes: _GRANT_REVIEW_MODES,
   });
   return new GrantReviewer(bot);
 }
 
-const GRANT_REVIEWER_MODES = Object.freeze({
+enum GrantReviewMode {
+  STANDARD = "standard",
+  SUMMARY = "summary",
+  TECHNICAL = "technical",
+  SCORED = "scored",
+  AIMS = "aims"
+}
+
+const _GRANT_REVIEW_MODES = Object.freeze({
   /* Standard Review
    * userPrompt: "Please review my proposal against the RFA requirements. Analyze the alignment, identify any gaps, and provide specific recommendations for improvement."
    */
-  standard_review: {
+  [GrantReviewMode.STANDARD]: {
     name: "Standard Proposal Review",
     description: "Comprehensive analysis of proposal alignment with RFA requirements",
-    mode: `You are an expert NIH grant reviewer with deep knowledge of biomedical research funding. You have access to the RFA and proposal documents for this conversation.
+    prompt: "Please provide an executive summary review of my proposal, focusing on strategic impact, innovation potential, and alignment with funding priorities.",
+    context: `You are an expert NIH grant reviewer with deep knowledge of biomedical research funding. You have access to the RFA and proposal documents for this conversation.
 
 RFA Requirements:
 {rfaContent}
@@ -69,13 +123,12 @@ FORMATTING GUIDELINES:
 - Use horizontal rules (---) to separate major sections when appropriate
 
 You can reference the conversation history to build on previous analysis and provide contextual responses.`},
-  /*
-   * userPrompt: "Please provide an executive summary review of my proposal, focusing on strategic impact, innovation potential, and alignment with funding priorities."
-   */
-  summary_review: {
+   
+  [GrantReviewMode.SUMMARY]: {
     name: "Executive Summary Review",
     description: "High-level strategic analysis focusing on impact and innovation",
-    mode: `You are a senior NIH grant reviewer and strategic advisor with expertise in evaluating research proposals from a high-level strategic perspective. You have access to the RFA and proposal documents for this conversation.
+    prompt: "Please conduct a technical deep-dive review of my proposal, analyzing methodology, feasibility, and technical approach in detail.",
+    context: `You are a senior NIH grant reviewer and strategic advisor with expertise in evaluating research proposals from a high-level strategic perspective. You have access to the RFA and proposal documents for this conversation.
 
 RFA Requirements:
 {rfaContent}
@@ -105,13 +158,11 @@ FORMATTING GUIDELINES:
 - Use horizontal rules (---) to separate major strategic sections
 
 You can reference the conversation history to build on previous analysis and provide contextual responses.`},
-  /*
-   * userPrompt: "Please conduct a technical deep-dive review of my proposal, analyzing methodology, feasibility, and technical approach in detail."
-   */
-  technical_review: {
+  [GrantReviewMode.TECHNICAL]: {
     name: "Technical Deep Dive Review",
     description: "Detailed technical analysis with methodology and feasibility focus",
-    mode: `You are a technical NIH grant reviewer with deep expertise in research methodology, experimental design, and technical feasibility. You have access to the RFA and proposal documents for this conversation.
+    prompt: "Please provide a comprehensive NIH-style critique of my proposal with scoring according to the NIH rubric, including detailed analysis of significance, investigators, innovation, approach, environment, and overall impact.",
+    context: `You are a technical NIH grant reviewer with deep expertise in research methodology, experimental design, and technical feasibility. You have access to the RFA and proposal documents for this conversation.
 
 RFA Requirements:
 {rfaContent}
@@ -143,13 +194,11 @@ FORMATTING GUIDELINES:
 - Use horizontal rules (---) to separate major technical sections
 
 You can reference the conversation history to build on previous analysis and provide contextual responses.`},
-  /* 
-   * userPrompt: "Please provide a comprehensive NIH-style critique of my proposal with scoring according to the NIH rubric, including detailed analysis of significance, investigators, innovation, approach, environment, and overall impact."
-   */
-  scored_review: {
+  [GrantReviewMode.SCORED]: {
     name: "Standard Review 2",
     description: "Mighty Reviewer - Comprehensive NIH-style critique with scoring",
-    mode: `You are a simulated grant reviewer for an NIH proposal. You will write a critique and score the grant according to the NIH rubric and format your reply in well-formatted markdown.
+    prompt: "Please provide a comprehensive NIH standing-study-section review of my Specific Aims page, including numeric scores and detailed feedback following the structured format.",
+    context: `You are a simulated grant reviewer for an NIH proposal. You will write a critique and score the grant according to the NIH rubric and format your reply in well-formatted markdown.
 
 RFA Requirements:
 {rfaContent}
@@ -326,13 +375,11 @@ ENHANCED FORMATTING REQUIREMENTS:
 - Use horizontal rules (---) to separate major sections when appropriate
 `,
   },
-  /* 
-   * userPrompt: "Please provide a comprehensive NIH standing-study-section review of my Specific Aims page, including numeric scores and detailed feedback following the structured format."
-   */
-  nih_aims_review: {
+  [GrantReviewMode.AIMS]: {
     name: "NIH Specific Aims Review", 
     description: "Comprehensive NIH standing-study-section review of Specific Aims with scoring and detailed feedback",
-    mode: `You are serving as an NIH standing-study-section reviewer. Evaluate the applicant's "Specific Aims" page for scientific merit and grantsmanship, using the criteria and structure below.
+    prompt: "Please provide a comprehensive NIH standing-study-section review of my Specific Aims page, including numeric scores and detailed feedback following the structured format.",
+    context: `You are serving as an NIH standing-study-section reviewer. Evaluate the applicant's "Specific Aims" page for scientific merit and grantsmanship, using the criteria and structure below.
 
 RFA Requirements:
 {rfaContent}
@@ -429,13 +476,3 @@ Deliver your review in **Markdown** using the following headings:
 `
   }
 });
-
-/*
-export function renderPromptTemplate(template: string, context: DocumentContext): string {
-  return template
-    .replace(/{rfaContent}/g, context.rfaContent)
-    .replace(/{proposalContent}/g, context.targetContent)
-    .replace(/{aimsContent}/g, context.targetContent)
-    .replace(/{previousFeedback}/g, context.previousFeedback.join('\n\n'));
-} 
-*/

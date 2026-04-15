@@ -1,1 +1,5 @@
-export { make_grant_reviewer } from "#bot/grant_reviewer.js";
+export { 
+  make_grant_reviewer,
+  GrantReviewMode,
+  GrantReviewContent,
+} from "#bot/grant_reviewer.js";

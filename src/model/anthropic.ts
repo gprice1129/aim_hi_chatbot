@@ -11,6 +11,12 @@ import { APIKey } from "#core/types.js";
 import { Model } from "#core/model.js";
 import { Memory } from "#core/memory.js";
 
+enum AnthropicStopReason {
+  END_TURN = 'end_turn',
+  MAX_TOKENS = 'max_tokens',
+  STOP_SEQ = 'stop_sequence',
+  TOOL = 'tool_use',
+}
 enum AnthropicModelEffortScale {
   Low = "low",
   Medium = "medium",
@@ -28,13 +34,13 @@ enum AnthropicRole {
   User = "user",
 }
 enum AnthropicContentType {
-  Text = "text",
-  Document = "document",
+  TEXT = "text",
+  TOOL = "tool_use",
 }
 interface AnthropicModelOpts {
-  effort: AnthropicModelEffort;
-  system_prompt: string;
-  max_tokens: number;
+  effort?: AnthropicModelEffort;
+  system_prompt?: string;
+  max_tokens?: number;
 }
 
 class AnthropicModel implements Model {
@@ -69,5 +75,22 @@ class AnthropicModel implements Model {
       output_config: { effort: opts.effort ?? this._effort ?? undefined },
       messages: memories,
     });
+  }
+
+  public extract_content(msg: Anthropic.Message): string[] | false {
+    console.log(`Token usage metrics: ${JSON.stringify(msg.usage,null,2)}`);
+    const stop_reason = msg.stop_reason;
+    if (AnthropicStopReason.END_TURN !== stop_reason) {
+      console.error(`Error: API message extraction failed. Stop reason: ${stop_reason}`);
+      return false; 
+    }
+    const text_blocks = [];
+    for (let i = 0; i < msg.content.length; i++) {
+      const block = msg.content[i];
+      if (AnthropicContentType.TEXT === block.type) {
+        text_blocks.push(block.text);
+      }
+    }
+    return text_blocks;
   }
 }

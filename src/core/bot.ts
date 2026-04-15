@@ -10,7 +10,8 @@ import { Memory } from "#core/memory.js";
 interface ChatbotMode {
   name: string;
   description: string;
-  mode: string;
+  prompt: string;
+  context: string;
 };
 interface ChatbotOpts {
   model: Model;
@@ -21,7 +22,7 @@ interface ChatbotOpts {
 class Chatbot {
   private _model: Model;
   private _modes: Record<string, ChatbotMode> | null;
-  private _current_mode: ChatbotMode | null;
+  private _current_mode: string | null;
   private _memories: Memory[];
 
   constructor(opts: ChatbotOpts) {
@@ -32,13 +33,25 @@ class Chatbot {
   }
 
   /*
+   * (void) => string | null
+   * Gets the current mode ID or null if no mode is set
+   * Pure
+   * Public
+   */
+  public mode_id(): string | null {
+    if (null === this._current_mode) return null;
+    return this._current_mode;
+  }
+
+  /*
    * (void) => ChatbotMode | null
    * Gets the current mode or null if no mode is set
    * Pure
    * Public
    */
   public mode(): ChatbotMode | null {
-    return this._current_mode;
+    if (null === this._modes || null === this._current_mode) return null;
+    return this._modes[this._current_mode];
   }
 
   /*
@@ -47,11 +60,11 @@ class Chatbot {
    * Side Effect: Mutates internal mode state
    * Public
    */
-  public set_mode(key: string): ChatbotMode | boolean {
+  public set_mode(key: string): string | boolean {
     if (null === this._modes) return false;
     const selected_mode = this._modes[key]; 
     if (undefined === selected_mode) return false;
-    this._current_mode = selected_mode;
+    this._current_mode = key;
     return this._current_mode;
   }
 
@@ -76,6 +89,16 @@ class Chatbot {
   }
 
   /*
+   * (Memory) => void
+   * Convers a string to a memory and appends to all memories
+   * Side Effect: Mutates memory state
+   * Public
+   */
+  public add_str_to_memory(str: string): void {
+    this._memories.push(this._model.str_to_memory(str));
+  }
+
+  /*
    * (void) => ModelMessage
    * Generate a message from the model based on memory state
    * Pure
@@ -83,5 +106,9 @@ class Chatbot {
    */
   public async gen_message(opts: ModelOpts): Promise<ModelMessage> {
     return this._model.gen_message(this._memories, opts);
+  }
+
+  public extract_content(msg: ModelMessage): string[] | false {
+    return this._model.extract_content(msg);
   }
 }
