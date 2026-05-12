@@ -13,7 +13,8 @@ import { Chatbot } from "#core/bot.js";
 
 interface GrantReviewContent {
   rfa: string;
-  proposal: string;
+  proposal?: string;
+  aims?: string;
 }
 
 // TODO:[grant reviewer] Generalize recoverable error handling
@@ -44,7 +45,8 @@ class GrantReviewer {
     if (null === mode_context) return false;
     this._context = mode_context
       .replace(/{rfaContent}/g, content.rfa)
-      .replace(/{proposalContent}/g, content.proposal);
+      .replace(/{proposalContent}/g, content.proposal ?? "")
+      .replace(/{aimsContent}/g, content.aims ?? "");
     return true;
   }
 
