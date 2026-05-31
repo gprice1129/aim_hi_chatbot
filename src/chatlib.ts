@@ -1,4 +1,8 @@
 export {
+  make_ally,
+} from "#bot/ally.js";
+
+export {
   make_grant_reviewer,
   GrantReviewMode,
   GrantReviewContent,

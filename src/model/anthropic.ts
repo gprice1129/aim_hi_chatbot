@@ -71,11 +71,14 @@ class AnthropicModel implements Model {
   }
 
   public async gen_message(memories: Anthropic.MessageParam[], opts: AnthropicModelOpts): Promise<Anthropic.Message> {
+    // Only send output_config when an effort is set: some models (e.g. Haiku)
+    // reject the effort parameter outright, so an unset effort must omit it.
+    const effort = opts.effort ?? this._effort ?? undefined;
     return await this._client.messages.create({
       model: this._type,
       max_tokens: opts.max_tokens ?? this._max_tokens,
       system: opts.system_prompt,
-      output_config: { effort: opts.effort ?? this._effort ?? undefined },
+      ...(effort ? { output_config: { effort } } : {}),
       messages: memories,
     });
   }
