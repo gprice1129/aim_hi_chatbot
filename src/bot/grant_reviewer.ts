@@ -4,7 +4,7 @@ export {
   GrantReviewContent,
 }
 
-import { APIKey } from "#core/types.js";
+import { Endpoint } from "#core/types.js";
 import {
   AnthropicModelEffortScale,
   AnthropicModel,
@@ -62,14 +62,14 @@ class GrantReviewer {
 }
 
 /*
- * Signature: (APIKey) => GrantReviewer
+ * Signature: (Endpoint) => GrantReviewer
  * Pure
  * Public
  */
-function make_grant_reviewer(api_key: APIKey): GrantReviewer {
+function make_grant_reviewer(endpoint: Endpoint): GrantReviewer {
   const bot = new Chatbot({
     model: new AnthropicModel(
-      api_key, 
+      endpoint,
       AnthropicModelType.Opus,
       AnthropicModelEffortScale.Max,
       16384),
