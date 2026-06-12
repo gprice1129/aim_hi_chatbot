@@ -6,6 +6,7 @@ export {
 
 import { Model, ModelOpts, ModelMessage } from "#core/model.js";
 import { Memory } from "#core/memory.js";
+import { BotFailure, type BotReply } from "#core/result.js";
 
 interface ChatbotMode {
   name: string;
@@ -110,5 +111,23 @@ class Chatbot {
 
   public extract_content(msg: ModelMessage): string[] | false {
     return this._model.extract_content(msg);
+  }
+
+  /*
+   * (ModelOpts) => BotReply
+   * Generate a message and return a usable reply or a classified failure.
+   * Side Effect: network call to the model
+   * Public
+   */
+  public async gen_reply(opts: ModelOpts): Promise<BotReply> {
+    let msg: ModelMessage;
+    try {
+      msg = await this.gen_message(opts);
+    } catch (err) {
+      return { ok: false, failure: BotFailure.UNAVAILABLE, cause: err };
+    }
+    const content = this.extract_content(msg);
+    if (false === content) return { ok: false, failure: BotFailure.INCOMPLETE };
+    return { ok: true, content };
   }
 }

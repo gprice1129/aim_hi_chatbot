@@ -8,22 +8,21 @@ import {
   AnthropicModelType, } from "#model/anthropic.js";
 import { Chatbot } from "#core/bot.js";
 import { Memory } from "#core/memory.js";
+import type { BotReply } from "#core/result.js";
 
-// Ally is a general-purpose, conversational assistant (unlike the one-shot,
-// file-driven GrantReviewer). It replays the prior chat turns into memory,
-// appends the new user message, and answers under a fixed persona.
 class Ally {
   private _bot: Chatbot;
+
   constructor(bot: Chatbot) {
     this._bot = bot;
   }
-  async respond(history: Memory[], message: string): Promise<string[] | false> {
+
+  async respond(history: Memory[], message: string): Promise<BotReply> {
     for (const turn of history) {
       this._bot.add_memory(turn);
     }
     this._bot.add_str_to_memory(message);
-    const msg = await this._bot.gen_message({ system_prompt: ALLY_SYSTEM_PROMPT });
-    return this._bot.extract_content(msg);
+    return this._bot.gen_reply({ system_prompt: ALLY_SYSTEM_PROMPT });
   }
 }
 

@@ -8,6 +8,14 @@ export {
   GrantReviewContent,
 } from "#bot/grant_reviewer.js";
 
+export {
+  BotFailure,
+} from "#core/result.js";
+
+export type {
+  BotReply,
+} from "#core/result.js";
+
 export type {
   APIKey,
   BaseURL,

@@ -10,6 +10,7 @@ import {
   AnthropicModel,
   AnthropicModelType, } from "#model/anthropic.js";
 import { Chatbot } from "#core/bot.js";
+import type { BotReply } from "#core/result.js";
 
 interface GrantReviewContent {
   rfa: string;
@@ -17,7 +18,6 @@ interface GrantReviewContent {
   aims?: string;
 }
 
-// TODO:[grant reviewer] Generalize recoverable error handling
 class GrantReviewer {
   private _bot: Chatbot
   private _context: string | null;
@@ -50,14 +50,15 @@ class GrantReviewer {
     return true;
   }
 
-  async review(): Promise<string[] | false> {
+  async review(): Promise<BotReply> {
     const prompt = this.mode_prompt();
-    if (null === this._context) return false;
+    if (null === this._context) {
+      throw new Error("GrantReviewer.review called before set_context");
+    }
     if (null !== prompt) {
       this._bot.add_str_to_memory(prompt);
     }
-    const msg = await this._bot.gen_message({system_prompt: this._context});
-    return this._bot.extract_content(msg)
+    return this._bot.gen_reply({ system_prompt: this._context });
   }
 }
 
