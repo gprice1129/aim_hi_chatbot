@@ -18,6 +18,8 @@ class Ally {
   }
 
   async respond(history: Memory[], message: string): Promise<BotReply> {
+    // TODO:[security] cap `message` and the total replayed history length before
+    // they enter the prompt — unbounded input is a token-cost/context risk.
     for (const turn of history) {
       this._bot.add_memory(turn);
     }

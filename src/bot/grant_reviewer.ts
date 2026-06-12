@@ -41,6 +41,9 @@ class GrantReviewer {
   }
   set_context(content: GrantReviewContent): boolean {
     // TODO:[grant reviewer] validate content
+    // TODO:[deploy] cap the injected rfa/proposal/aims length before it enters
+    // the Opus prompt — a 25MB parsed file blows up token cost, context, and
+    // latency.
     const mode_context = this.mode_context();
     if (null === mode_context) return false;
     this._context = mode_context
