@@ -7,8 +7,8 @@ import {
   AnthropicModel,
   AnthropicModelType, } from "#model/anthropic.js";
 import { Chatbot } from "#core/bot.js";
-import { Memory } from "#core/memory.js";
 import { ContextAssembler } from "#core/context.js";
+import type { HistorySource, ProjectContextSource } from "#core/context.js";
 import type { BotReply } from "#core/result.js";
 
 class Ally {
@@ -20,12 +20,21 @@ class Ally {
     this._assembler = assembler;
   }
 
-  async respond(history: Memory[], message: string): Promise<BotReply> {
-    for (const turn of this._assembler.window_history(history)) {
+  async respond(
+    history: HistorySource,
+    project: ProjectContextSource,
+    message: string,
+  ): Promise<BotReply> {
+    const { system, messages } = await this._assembler.assemble({
+      system_prompt: ALLY_SYSTEM_PROMPT,
+      history,
+      project,
+      message: this._bot.str_to_memory(message),
+    });
+    for (const turn of messages) {
       this._bot.add_memory(turn);
     }
-    this._bot.add_str_to_memory(this._assembler.clamp_message(message));
-    return this._bot.gen_reply({ system_prompt: ALLY_SYSTEM_PROMPT });
+    return this._bot.gen_reply({ system_prompt: system });
   }
 }
 
