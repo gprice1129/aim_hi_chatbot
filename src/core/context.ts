@@ -6,6 +6,8 @@ export type {
   ContextBudget,
 }
 
+import * as assert from "node:assert";
+
 import { Memory } from "#core/memory.js";
 
 /*
@@ -48,6 +50,10 @@ class ContextAssembler {
 
   constructor(budget: Partial<ContextBudget> = {}) {
     this._budget = { ...DEFAULT_CONTEXT_BUDGET, ...budget };
+    assert.ok(this._budget.max_message_chars    > 0, "max_message_chars must be > 0");
+    assert.ok(this._budget.max_history_messages > 0, "max_history_messages must be > 0");
+    assert.ok(this._budget.max_history_chars    > 0, "max_history_chars must be > 0");
+    assert.ok(this._budget.max_document_chars   > 0, "max_document_chars must be > 0");
   }
 
   /*

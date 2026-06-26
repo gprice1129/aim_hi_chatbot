@@ -16,6 +16,20 @@ function user(content: string): Memory {
   return { role: "user", content };
 }
 
+describe("ContextAssembler constructor", () => {
+  it("accepts a fully positive budget", () => {
+    assert.doesNotThrow(() => new ContextAssembler(BUDGET));
+  });
+
+  it("throws when a cap is zero", () => {
+    assert.throws(() => new ContextAssembler({ max_history_messages: 0 }));
+  });
+
+  it("throws when a cap is negative", () => {
+    assert.throws(() => new ContextAssembler({ max_document_chars: -1 }));
+  });
+});
+
 describe("ContextAssembler.clamp_message", () => {
   const a = new ContextAssembler(BUDGET);
 
