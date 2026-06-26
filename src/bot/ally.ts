@@ -8,22 +8,23 @@ import {
   AnthropicModelType, } from "#model/anthropic.js";
 import { Chatbot } from "#core/bot.js";
 import { Memory } from "#core/memory.js";
+import { ContextAssembler } from "#core/context.js";
 import type { BotReply } from "#core/result.js";
 
 class Ally {
   private _bot: Chatbot;
+  private _assembler: ContextAssembler;
 
-  constructor(bot: Chatbot) {
+  constructor(bot: Chatbot, assembler: ContextAssembler) {
     this._bot = bot;
+    this._assembler = assembler;
   }
 
   async respond(history: Memory[], message: string): Promise<BotReply> {
-    // TODO:[security] cap `message` and the total replayed history length before
-    // they enter the prompt — unbounded input is a token-cost/context risk.
-    for (const turn of history) {
+    for (const turn of this._assembler.window_history(history)) {
       this._bot.add_memory(turn);
     }
-    this._bot.add_str_to_memory(message);
+    this._bot.add_str_to_memory(this._assembler.clamp_message(message));
     return this._bot.gen_reply({ system_prompt: ALLY_SYSTEM_PROMPT });
   }
 }
@@ -42,7 +43,7 @@ function make_ally(endpoint: Endpoint): Ally {
       null,
       2048),
   });
-  return new Ally(bot);
+  return new Ally(bot, new ContextAssembler());
 }
 
 const ALLY_SYSTEM_PROMPT = `You are Ally, a friendly and concise AI assistant for the AIM+HI platform — a suite of tools supporting researchers and staff at the University of Alabama at Birmingham (UAB) and the Hugh Kaul Precision Medicine Institute.

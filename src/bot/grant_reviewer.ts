@@ -10,6 +10,7 @@ import {
   AnthropicModel,
   AnthropicModelType, } from "#model/anthropic.js";
 import { Chatbot } from "#core/bot.js";
+import { ContextAssembler } from "#core/context.js";
 import type { BotReply } from "#core/result.js";
 
 interface GrantReviewContent {
@@ -20,9 +21,11 @@ interface GrantReviewContent {
 
 class GrantReviewer {
   private _bot: Chatbot
+  private _assembler: ContextAssembler;
   private _context: string | null;
-  constructor(bot: Chatbot) {
+  constructor(bot: Chatbot, assembler: ContextAssembler) {
     this._bot = bot;
+    this._assembler = assembler;
     this._context = null;
   }
   mode() {
@@ -41,15 +44,12 @@ class GrantReviewer {
   }
   set_context(content: GrantReviewContent): boolean {
     // TODO:[grant reviewer] validate content
-    // TODO:[deploy] cap the injected rfa/proposal/aims length before it enters
-    // the Opus prompt — a 25MB parsed file blows up token cost, context, and
-    // latency.
     const mode_context = this.mode_context();
     if (null === mode_context) return false;
     this._context = mode_context
-      .replace(/{rfaContent}/g, content.rfa)
-      .replace(/{proposalContent}/g, content.proposal ?? "")
-      .replace(/{aimsContent}/g, content.aims ?? "");
+      .replace(/{rfaContent}/g, this._assembler.clamp_document("rfa", content.rfa))
+      .replace(/{proposalContent}/g, this._assembler.clamp_document("proposal", content.proposal ?? ""))
+      .replace(/{aimsContent}/g, this._assembler.clamp_document("aims", content.aims ?? ""));
     return true;
   }
 
@@ -79,7 +79,7 @@ function make_grant_reviewer(endpoint: Endpoint): GrantReviewer {
       16384),
     modes: _GRANT_REVIEW_MODES,
   });
-  return new GrantReviewer(bot);
+  return new GrantReviewer(bot, new ContextAssembler());
 }
 
 enum GrantReviewMode {
