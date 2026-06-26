@@ -21,3 +21,13 @@ export type {
   BaseURL,
   Endpoint,
 } from "#core/types.js";
+
+export type {
+  Memory,
+} from "#core/memory.js";
+
+export type {
+  HistorySource,
+  ProjectContextSource,
+  ProjectContext,
+} from "#core/context.js";

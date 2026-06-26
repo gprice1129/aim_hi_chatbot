@@ -3,6 +3,11 @@ import * as assert from "node:assert/strict";
 
 import { ContextAssembler } from "#core/context.js";
 import type { Memory } from "#core/memory.js";
+import type {
+  HistorySource,
+  ProjectContextSource,
+  ProjectContext,
+} from "#core/context.js";
 
 // Small explicit budget so truncation/windowing boundaries are easy to assert.
 const BUDGET = {
@@ -14,6 +19,19 @@ const BUDGET = {
 
 function user(content: string): Memory {
   return { role: "user", content };
+}
+
+function assistant(content: string): Memory {
+  return { role: "assistant", content };
+}
+
+// In-memory fake ports so assemble() can be exercised without any I/O.
+function history_of(...turns: Memory[]): HistorySource {
+  return { load: async () => turns };
+}
+
+function project_of(ctx: ProjectContext | null): ProjectContextSource {
+  return { load: async () => ctx };
 }
 
 describe("ContextAssembler constructor", () => {
@@ -129,5 +147,97 @@ describe("ContextAssembler.window_history", () => {
   it("returns a new array, not the input reference", () => {
     const history = [user("a")];
     assert.notEqual(a.window_history(history), history);
+  });
+});
+
+describe("ContextAssembler.assemble", () => {
+  it("returns just the base prompt and no messages when given no sources", async () => {
+    const out = await new ContextAssembler().assemble({ system_prompt: "BASE" });
+    assert.equal(out.system, "BASE");
+    assert.deepEqual(out.messages, []);
+  });
+
+  it("replays history into messages, in order, without touching the system prompt", async () => {
+    const out = await new ContextAssembler().assemble({
+      system_prompt: "BASE",
+      history: history_of(user("h1"), assistant("h2")),
+    });
+    assert.equal(out.system, "BASE");
+    assert.deepEqual(out.messages, [user("h1"), assistant("h2")]);
+  });
+
+  it("appends project instructions to the system prompt", async () => {
+    const out = await new ContextAssembler().assemble({
+      system_prompt: "BASE",
+      project: project_of({ instructions: "PROJECT RULES", memory: [] }),
+    });
+    assert.equal(out.system, "BASE\n\nPROJECT RULES");
+    assert.deepEqual(out.messages, []);
+  });
+
+  it("leaves the system prompt untouched when the chat is in no project", async () => {
+    const out = await new ContextAssembler().assemble({
+      system_prompt: "BASE",
+      project: project_of(null),
+    });
+    assert.equal(out.system, "BASE");
+    assert.deepEqual(out.messages, []);
+  });
+
+  it("leaves the system prompt untouched when the project sets no instructions", async () => {
+    const out = await new ContextAssembler().assemble({
+      system_prompt: "BASE",
+      project: project_of({ instructions: null, memory: [user("m")] }),
+    });
+    assert.equal(out.system, "BASE");
+    assert.deepEqual(out.messages, [user("m")]);
+  });
+
+  it("orders messages as project memory, then history, then the live turn", async () => {
+    const out = await new ContextAssembler().assemble({
+      system_prompt: "BASE",
+      project: project_of({ instructions: "PROJ", memory: [user("m1"), assistant("m2")] }),
+      history: history_of(user("h1"), assistant("h2")),
+      message: user("live"),
+    });
+    assert.equal(out.system, "BASE\n\nPROJ");
+    assert.deepEqual(out.messages, [
+      user("m1"), assistant("m2"),
+      user("h1"), assistant("h2"),
+      user("live"),
+    ]);
+  });
+
+  it("places the live turn last even with no history or project", async () => {
+    const out = await new ContextAssembler().assemble({
+      system_prompt: "BASE",
+      message: user("hi"),
+    });
+    assert.deepEqual(out.messages, [user("hi")]);
+  });
+
+  it("clamps an oversized live turn to the message budget", async () => {
+    const out = await new ContextAssembler(BUDGET).assemble({
+      system_prompt: "BASE",
+      message: user("x".repeat(20)), // > max_message_chars (10)
+    });
+    assert.equal(out.messages.length, 1);
+    const content = out.messages[0].content;
+    assert.ok(typeof content === "string");
+    assert.ok(content.startsWith("xxxxxxxxxx"));
+    assert.ok(content.includes("truncated"));
+    assert.ok(content.includes("message"));
+  });
+
+  it("windows project memory through the budget", async () => {
+    const out = await new ContextAssembler(BUDGET).assemble({
+      system_prompt: "BASE",
+      project: project_of({
+        instructions: null,
+        memory: [user("a"), user("b"), user("c"), user("d"), user("e")],
+      }),
+    });
+    // max_history_messages == 3 -> only the most recent three survive.
+    assert.deepEqual(out.messages, [user("c"), user("d"), user("e")]);
   });
 });
