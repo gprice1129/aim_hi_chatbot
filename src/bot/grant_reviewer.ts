@@ -4,13 +4,9 @@ export {
   GrantReviewContent,
 }
 
-import { Endpoint } from "#core/types.js";
-import {
-  AnthropicModelEffortScale,
-  AnthropicModel,
-  AnthropicModelType, } from "#model/anthropic.js";
 import { Chatbot } from "#core/bot.js";
 import { ContextAssembler } from "#core/context.js";
+import type { Model } from "#core/model.js";
 import type { BotReply } from "#core/result.js";
 
 interface GrantReviewContent {
@@ -66,17 +62,13 @@ class GrantReviewer {
 }
 
 /*
- * Signature: (Endpoint) => GrantReviewer
+ * Signature: (Model) => GrantReviewer
  * Pure
  * Public
  */
-function make_grant_reviewer(endpoint: Endpoint): GrantReviewer {
+function make_grant_reviewer(model: Model): GrantReviewer {
   const bot = new Chatbot({
-    model: new AnthropicModel(
-      endpoint,
-      AnthropicModelType.Opus,
-      AnthropicModelEffortScale.Max,
-      16384),
+    model,
     modes: _GRANT_REVIEW_MODES,
   });
   return new GrantReviewer(bot, new ContextAssembler());

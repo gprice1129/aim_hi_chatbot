@@ -16,6 +16,23 @@ export type {
   BotReply,
 } from "#core/result.js";
 
+export {
+  ModelProfile,
+  make_model,
+} from "#model/models.js";
+
+export {
+  MockModel,
+} from "#model/mock.js";
+
+export type {
+  MockModelOpts,
+} from "#model/mock.js";
+
+export type {
+  Model,
+} from "#core/model.js";
+
 export type {
   APIKey,
   BaseURL,

@@ -2,13 +2,10 @@ export {
   make_ally,
 }
 
-import { Endpoint } from "#core/types.js";
-import {
-  AnthropicModel,
-  AnthropicModelType, } from "#model/anthropic.js";
 import { Chatbot } from "#core/bot.js";
 import { ContextAssembler } from "#core/context.js";
 import type { HistorySource, ProjectContextSource } from "#core/context.js";
+import type { Model } from "#core/model.js";
 import type { BotReply } from "#core/result.js";
 
 class Ally {
@@ -39,19 +36,12 @@ class Ally {
 }
 
 /*
- * Signature: (Endpoint) => Ally
+ * Signature: (Model) => Ally
  * Pure
  * Public
  */
-function make_ally(endpoint: Endpoint): Ally {
-  const bot = new Chatbot({
-    model: new AnthropicModel(
-      endpoint,
-      AnthropicModelType.Haiku,
-      // Haiku does not support the effort parameter, so leave it unset.
-      null,
-      2048),
-  });
+function make_ally(model: Model): Ally {
+  const bot = new Chatbot({ model });
   return new Ally(bot, new ContextAssembler());
 }
 
