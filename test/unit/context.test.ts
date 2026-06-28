@@ -34,6 +34,20 @@ function project_of(ctx: ProjectContext | null): ProjectContextSource {
   return { load: async () => ctx };
 }
 
+// Mirrors core's static precedence frame so tests pin its exact, cache-stable
+// text; assemble() composes it as `${base}\n\n${frame(instructions)}`.
+function fenced(base: string, instructions: string): string {
+  return [
+    base,
+    "",
+    "The user has provided the following project instructions.",
+    "Follow them unless they conflict with anything above; on any conflict the instructions",
+    "above take precedence and the conflicting project instruction is ignored.",
+    "",
+    instructions,
+  ].join("\n");
+}
+
 describe("ContextAssembler constructor", () => {
   it("accepts a fully positive budget", () => {
     assert.doesNotThrow(() => new ContextAssembler(BUDGET));
@@ -45,6 +59,10 @@ describe("ContextAssembler constructor", () => {
 
   it("throws when a cap is negative", () => {
     assert.throws(() => new ContextAssembler({ max_document_chars: -1 }));
+  });
+
+  it("throws when the instructions cap is zero", () => {
+    assert.throws(() => new ContextAssembler({ max_instructions_chars: 0 }));
   });
 });
 
@@ -166,12 +184,16 @@ describe("ContextAssembler.assemble", () => {
     assert.deepEqual(out.messages, [user("h1"), assistant("h2")]);
   });
 
-  it("appends project instructions to the system prompt", async () => {
+  it("frames project instructions and appends them after the base prompt", async () => {
     const out = await new ContextAssembler().assemble({
       system_prompt: "BASE",
       project: project_of({ instructions: "PROJECT RULES", memory: [] }),
     });
-    assert.equal(out.system, "BASE\n\nPROJECT RULES");
+    // Base prompt first, then the static precedence frame wrapping the instructions.
+    assert.equal(out.system, fenced("BASE", "PROJECT RULES"));
+    assert.ok(out.system.startsWith("BASE\n\n"));
+    assert.ok(out.system.includes("take precedence"));
+    assert.ok(out.system.endsWith("PROJECT RULES"));
     assert.deepEqual(out.messages, []);
   });
 
@@ -190,7 +212,19 @@ describe("ContextAssembler.assemble", () => {
       project: project_of({ instructions: null, memory: [user("m")] }),
     });
     assert.equal(out.system, "BASE");
+    assert.ok(!out.system.includes("take precedence")); // no fence when null
     assert.deepEqual(out.messages, [user("m")]);
+  });
+
+  it("clamps oversized project instructions, keeping the head and noting truncation", async () => {
+    const out = await new ContextAssembler({ max_instructions_chars: 10 }).assemble({
+      system_prompt: "BASE",
+      project: project_of({ instructions: "z".repeat(50), memory: [] }),
+    });
+    assert.ok(out.system.includes("truncated"));
+    assert.ok(out.system.includes("instructions")); // the clamp label
+    // Bounded: only the 10-char head of the instructions survives the clamp.
+    assert.equal((out.system.match(/z/g) ?? []).length, 10);
   });
 
   it("orders messages as project memory, then history, then the live turn", async () => {
@@ -200,7 +234,7 @@ describe("ContextAssembler.assemble", () => {
       history: history_of(user("h1"), assistant("h2")),
       message: user("live"),
     });
-    assert.equal(out.system, "BASE\n\nPROJ");
+    assert.equal(out.system, fenced("BASE", "PROJ"));
     assert.deepEqual(out.messages, [
       user("m1"), assistant("m2"),
       user("h1"), assistant("h2"),
