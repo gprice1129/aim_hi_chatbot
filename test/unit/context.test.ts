@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 
 import { ContextAssembler } from "#core/context.js";
+import { estimate_tokens } from "#core/tokens.js";
 import type { Memory } from "#core/memory.js";
 import type {
   HistorySource,
@@ -9,12 +10,15 @@ import type {
   ProjectContext,
 } from "#core/context.js";
 
-// Small explicit budget so truncation/windowing boundaries are easy to assert.
+// Small explicit token budget so truncation/windowing boundaries are easy to
+// assert. The estimator is ceil(chars / 4), so 1 token == 4 chars; string
+// lengths below are kept as clean multiples of 4.
 const BUDGET = {
-  max_message_chars:    10,
-  max_history_messages: 3,
-  max_history_chars:    20,
-  max_document_chars:   10,
+  max_message_tokens:       3,   // 12 chars
+  max_history_messages:     3,
+  max_total_context_tokens: 6,   // 24 chars
+  max_document_tokens:      3,   // 12 chars
+  max_instructions_tokens:  3,   // 12 chars
 };
 
 function user(content: string): Memory {
@@ -48,6 +52,13 @@ function fenced(base: string, instructions: string): string {
   ].join("\n");
 }
 
+// Total estimated tokens of a string-content message list.
+function total_tokens(messages: Memory[]): number {
+  return messages.reduce(
+    (sum, m) => sum + estimate_tokens(typeof m.content === "string" ? m.content : ""),
+    0);
+}
+
 describe("ContextAssembler constructor", () => {
   it("accepts a fully positive budget", () => {
     assert.doesNotThrow(() => new ContextAssembler(BUDGET));
@@ -58,11 +69,15 @@ describe("ContextAssembler constructor", () => {
   });
 
   it("throws when a cap is negative", () => {
-    assert.throws(() => new ContextAssembler({ max_document_chars: -1 }));
+    assert.throws(() => new ContextAssembler({ max_document_tokens: -1 }));
   });
 
   it("throws when the instructions cap is zero", () => {
-    assert.throws(() => new ContextAssembler({ max_instructions_chars: 0 }));
+    assert.throws(() => new ContextAssembler({ max_instructions_tokens: 0 }));
+  });
+
+  it("throws when the total-context cap is zero", () => {
+    assert.throws(() => new ContextAssembler({ max_total_context_tokens: 0 }));
   });
 });
 
@@ -70,19 +85,20 @@ describe("ContextAssembler.clamp_message", () => {
   const a = new ContextAssembler(BUDGET);
 
   it("returns a message under the cap unchanged", () => {
-    assert.equal(a.clamp_message("hello"), "hello");
+    assert.equal(a.clamp_message("hello"), "hello"); // 5 chars -> 2 tokens
   });
 
   it("returns a message exactly at the cap unchanged", () => {
-    const msg = "0123456789"; // length 10 == max_message_chars
+    const msg = "x".repeat(12); // 12 chars == 3 tokens == max_message_tokens
     assert.equal(a.clamp_message(msg), msg);
   });
 
   it("truncates an over-cap message and keeps the head", () => {
-    const out = a.clamp_message("0123456789ABCDEF");
-    assert.ok(out.startsWith("0123456789"));
+    const out = a.clamp_message("x".repeat(20)); // 5 tokens > 3
+    assert.ok(out.startsWith("x".repeat(12)));    // head is 3 tokens of chars
     assert.ok(out.includes("truncated"));
     assert.ok(out.includes("message"));
+    assert.ok(out.includes("tokens"));
   });
 
   it("returns an empty message unchanged", () => {
@@ -98,15 +114,15 @@ describe("ContextAssembler.clamp_document", () => {
   });
 
   it("truncates an over-cap document and names the label in the notice", () => {
-    const out = a.clamp_document("rfa", "0123456789ABCDEF");
-    assert.ok(out.startsWith("0123456789"));
+    const out = a.clamp_document("rfa", "x".repeat(20));
+    assert.ok(out.startsWith("x".repeat(12)));
     assert.ok(out.includes("truncated"));
     assert.ok(out.includes("rfa"));
   });
 
   it("honors a per-instance budget override", () => {
-    const wide = new ContextAssembler({ max_document_chars: 100 });
-    const doc = "0123456789ABCDEF"; // 16 chars: over the default-small budget, under 100
+    const wide = new ContextAssembler({ max_document_tokens: 100 });
+    const doc = "x".repeat(64); // 16 tokens: over the small budget, under 100
     assert.equal(wide.clamp_document("rfa", doc), doc);
   });
 });
@@ -119,7 +135,7 @@ describe("ContextAssembler.window_history", () => {
   });
 
   it("returns history under both caps unchanged and in chronological order", () => {
-    const history = [user("aa"), user("bb"), user("cc")]; // 3 turns, 6 chars
+    const history = [user("aa"), user("bb"), user("cc")]; // 3 turns, 1 token each
     assert.deepEqual(a.window_history(history), history);
   });
 
@@ -129,29 +145,39 @@ describe("ContextAssembler.window_history", () => {
     assert.deepEqual(a.window_history(history), [user("c"), user("d"), user("e")]);
   });
 
-  it("drops oldest turns when the char cap is exceeded", () => {
-    // Each turn is 5 chars; max_history_chars == 20 -> at most four fit.
-    // Use a high count cap so only the char cap bites.
+  it("drops oldest turns when the token budget is exceeded", () => {
+    // Each turn is 8 chars == 2 tokens; budget is 6 tokens -> at most three fit.
+    // Use a high count cap so only the token budget bites.
     const wide = new ContextAssembler({ ...BUDGET, max_history_messages: 100 });
-    const history = ["aaaaa", "bbbbb", "ccccc", "ddddd", "eeeee"].map(user);
+    const history = ["a", "b", "c", "d", "e"].map((ch) => user(ch.repeat(8)));
     assert.deepEqual(
       wide.window_history(history),
-      [user("bbbbb"), user("ccccc"), user("ddddd"), user("eeeee")],
+      [user("c".repeat(8)), user("d".repeat(8)), user("e".repeat(8))],
     );
   });
 
-  it("keeps the single most recent turn, clamped, when it alone exceeds the char cap", () => {
-    const history = [user("x".repeat(50))];
+  it("keeps the single most recent turn, clamped, when it alone exceeds the budget", () => {
+    const history = [user("x".repeat(40))]; // 10 tokens > 6
     const out = a.window_history(history);
     assert.equal(out.length, 1);
     assert.ok(typeof out[0].content === "string" && out[0].content.includes("truncated"));
   });
 
   it("never collapses to empty: most recent turn survives even when older turns are dropped", () => {
-    const history = [user("aa"), user("y".repeat(50))];
+    const history = [user("aa"), user("y".repeat(40))];
     const out = a.window_history(history);
     assert.equal(out.length, 1);
     assert.ok(typeof out[0].content === "string" && out[0].content.startsWith("y"));
+  });
+
+  it("honors an explicit token budget argument", () => {
+    const wide = new ContextAssembler({ ...BUDGET, max_history_messages: 100 });
+    const history = ["a", "b", "c", "d"].map((ch) => user(ch.repeat(8))); // 2 tokens each
+    // Budget of 4 tokens -> only the last two (4 tokens) fit.
+    assert.deepEqual(
+      wide.window_history(history, 4),
+      [user("c".repeat(8)), user("d".repeat(8))],
+    );
   });
 
   it("does not mutate the input array", () => {
@@ -189,7 +215,6 @@ describe("ContextAssembler.assemble", () => {
       system_prompt: "BASE",
       project: project_of({ instructions: "PROJECT RULES", memory: [] }),
     });
-    // Base prompt first, then the static precedence frame wrapping the instructions.
     assert.equal(out.system, fenced("BASE", "PROJECT RULES"));
     assert.ok(out.system.startsWith("BASE\n\n"));
     assert.ok(out.system.includes("take precedence"));
@@ -217,14 +242,14 @@ describe("ContextAssembler.assemble", () => {
   });
 
   it("clamps oversized project instructions, keeping the head and noting truncation", async () => {
-    const out = await new ContextAssembler({ max_instructions_chars: 10 }).assemble({
+    const out = await new ContextAssembler({ max_instructions_tokens: 3 }).assemble({
       system_prompt: "BASE",
-      project: project_of({ instructions: "z".repeat(50), memory: [] }),
+      project: project_of({ instructions: "z".repeat(40), memory: [] }),
     });
     assert.ok(out.system.includes("truncated"));
     assert.ok(out.system.includes("instructions")); // the clamp label
-    // Bounded: only the 10-char head of the instructions survives the clamp.
-    assert.equal((out.system.match(/z/g) ?? []).length, 10);
+    // Bounded: only the 3-token (12-char) head of the instructions survives.
+    assert.equal((out.system.match(/z/g) ?? []).length, 12);
   });
 
   it("orders messages as project memory, then history, then the live turn", async () => {
@@ -253,17 +278,17 @@ describe("ContextAssembler.assemble", () => {
   it("clamps an oversized live turn to the message budget", async () => {
     const out = await new ContextAssembler(BUDGET).assemble({
       system_prompt: "BASE",
-      message: user("x".repeat(20)), // > max_message_chars (10)
+      message: user("x".repeat(20)), // 5 tokens > max_message_tokens (3)
     });
     assert.equal(out.messages.length, 1);
     const content = out.messages[0].content;
     assert.ok(typeof content === "string");
-    assert.ok(content.startsWith("xxxxxxxxxx"));
+    assert.ok(content.startsWith("x".repeat(12)));
     assert.ok(content.includes("truncated"));
     assert.ok(content.includes("message"));
   });
 
-  it("windows project memory through the budget", async () => {
+  it("windows project memory through the count cap", async () => {
     const out = await new ContextAssembler(BUDGET).assemble({
       system_prompt: "BASE",
       project: project_of({
@@ -273,5 +298,86 @@ describe("ContextAssembler.assemble", () => {
     });
     // max_history_messages == 3 -> only the most recent three survive.
     assert.deepEqual(out.messages, [user("c"), user("d"), user("e")]);
+  });
+
+  // --- Unified-budget priority (Phase C) ---------------------------------------
+
+  it("drops project memory, not history, when the budget is full", async () => {
+    // budget 10 tokens; history alone fills it, memory then gets nothing.
+    const a = new ContextAssembler({
+      max_message_tokens: 100,
+      max_history_messages: 100,
+      max_total_context_tokens: 10,
+      max_document_tokens: 100,
+      max_instructions_tokens: 100,
+    });
+    const out = await a.assemble({
+      system_prompt: "BASE",
+      project: project_of({ instructions: null, memory: [user("m".repeat(40))] }), // 10 tokens
+      history: history_of(user("h".repeat(40))),                                   // 10 tokens
+    });
+    // History retained whole; the cross-chat memory turn is dropped entirely.
+    assert.equal(out.messages.length, 1);
+    assert.equal(out.messages[0].content, "h".repeat(40));
+    assert.ok(!out.messages.some(
+      (m) => typeof m.content === "string" && m.content.startsWith("m")));
+  });
+
+  it("always includes the live turn, clamped, even alongside history and memory", async () => {
+    const a = new ContextAssembler({
+      max_message_tokens: 3,
+      max_history_messages: 100,
+      max_total_context_tokens: 100,
+      max_document_tokens: 100,
+      max_instructions_tokens: 100,
+    });
+    const out = await a.assemble({
+      system_prompt: "BASE",
+      project: project_of({ instructions: null, memory: [user("m1")] }),
+      history: history_of(user("h1")),
+      message: user("x".repeat(40)), // 10 tokens > max_message_tokens (3)
+    });
+    const last = out.messages[out.messages.length - 1];
+    assert.ok(typeof last.content === "string");
+    assert.ok(last.content.startsWith("x".repeat(12))); // clamped to 3 tokens
+    assert.ok(last.content.includes("truncated"));
+    assert.ok(out.messages.some((m) => m.content === "m1"));
+    assert.ok(out.messages.some((m) => m.content === "h1"));
+  });
+
+  it("keeps the live turn even when the total budget is tiny", async () => {
+    const a = new ContextAssembler({
+      max_message_tokens: 3,
+      max_history_messages: 100,
+      max_total_context_tokens: 1,
+      max_document_tokens: 100,
+      max_instructions_tokens: 100,
+    });
+    const out = await a.assemble({
+      system_prompt: "BASE",
+      message: user("hi"), // 1 token, under the message cap -> unchanged
+    });
+    assert.deepEqual(out.messages, [user("hi")]);
+  });
+
+  it("keeps total replayed context within the unified budget (uniform turns)", async () => {
+    const budget = 10;
+    const a = new ContextAssembler({
+      max_message_tokens: 100,
+      max_history_messages: 100,
+      max_total_context_tokens: budget,
+      max_document_tokens: 100,
+      max_instructions_tokens: 100,
+    });
+    const history = Array.from({ length: 20 }, () => user("aaaa")); // 1 token each
+    const out = await a.assemble({
+      system_prompt: "BASE",
+      history: history_of(...history),
+      message: user("bbbb"), // 1 token live turn
+    });
+    // Old behavior windowed memory and history independently (~2x); the unified
+    // budget keeps the live turn + history within a single cap.
+    assert.ok(total_tokens(out.messages) <= budget);
+    assert.ok(out.messages.length < history.length + 1); // some oldest dropped
   });
 });

@@ -48,3 +48,12 @@ export type {
   ProjectContextSource,
   ProjectContext,
 } from "#core/context.js";
+
+export {
+  estimate_tokens,
+  DEFAULT_CHARS_PER_TOKEN,
+} from "#core/tokens.js";
+
+export type {
+  TokenEstimator,
+} from "#core/tokens.js";
