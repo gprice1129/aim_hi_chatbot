@@ -20,6 +20,8 @@ enum ModelProfile {
   Fast = "fast",
   // Heavy reasoning model with a large output budget for one-shot analysis.
   Deep = "deep",
+  // Cheap model with a small output cap for out-of-band chat summarization
+  Summary = "summary",
 }
 
 /*
@@ -30,10 +32,11 @@ enum ModelProfile {
 function make_model(endpoint: Endpoint, profile: ModelProfile): Model {
   switch (profile) {
     case ModelProfile.Fast:
-      // Haiku with the effort parameter unset (Haiku rejects it) and a 2048-token cap.
       return new AnthropicModel(endpoint, AnthropicModelType.Haiku, null, 2048);
     case ModelProfile.Deep:
       return new AnthropicModel(
         endpoint, AnthropicModelType.Opus, AnthropicModelEffortScale.Max, 16384);
+    case ModelProfile.Summary:
+      return new AnthropicModel(endpoint, AnthropicModelType.Haiku, null, 512);
   }
 }

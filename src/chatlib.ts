@@ -9,6 +9,14 @@ export {
 } from "#bot/grant_reviewer.js";
 
 export {
+  make_chat_summarizer,
+} from "#bot/chat_summarizer.js";
+
+export type {
+  ChatSummarizer,
+} from "#bot/chat_summarizer.js";
+
+export {
   BotFailure,
 } from "#core/result.js";
 
