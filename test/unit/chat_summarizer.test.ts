@@ -34,4 +34,20 @@ describe("ChatSummarizer.summarize (via MockModel)", () => {
     // ...and the full transcript is replayed as the messages, in order.
     assert.deepEqual(call.memories, history);
   });
+
+  it("does not carry one chat's transcript into the next call", async () => {
+    // One reused summarizer serves many chats out of band; a prior chat's turns
+    // must never leak into a later chat's summary (else one user's private
+    // conversation lands in another's memory).
+    const mock = new MockModel({ reply: "ok" });
+    const summarizer = make_chat_summarizer(mock);
+
+    await summarizer.summarize([{ role: "user", content: "chat A secret" }]);
+    await summarizer.summarize([{ role: "user", content: "chat B" }]);
+
+    // The second call sees only chat B -- not chat A followed by chat B.
+    assert.deepEqual(mock.calls()[1].memories, [
+      { role: "user", content: "chat B" },
+    ]);
+  });
 });

@@ -12,24 +12,21 @@ import type { Model } from "#core/model.js";
 import type { BotReply } from "#core/result.js";
 
 class ChatSummarizer {
-  private _bot: Chatbot;
+  private _model: Model;
 
-  constructor(bot: Chatbot) {
-    this._bot = bot;
+  constructor(model: Model) {
+    this._model = model;
   }
 
   /*
    * (Memory[]) => BotReply
-   * Summarize a chat transcript into one short, factual digest for use as
-   * background context in the project's sibling chats.
+   * Summarize a chat transcript into one short, factual digest.
    * Side Effect: network call to the model
    * Public
    */
   async summarize(history: Memory[]): Promise<BotReply> {
-    for (const turn of history) {
-      this._bot.add_memory(turn);
-    }
-    return this._bot.gen_reply({ system_prompt: SUMMARY_PROMPT });
+    const bot = new Chatbot({ model: this._model, init_memory: [...history] });
+    return bot.gen_reply({ system_prompt: SUMMARY_PROMPT });
   }
 }
 
@@ -39,8 +36,7 @@ class ChatSummarizer {
  * Public
  */
 function make_chat_summarizer(model: Model): ChatSummarizer {
-  const bot = new Chatbot({ model });
-  return new ChatSummarizer(bot);
+  return new ChatSummarizer(model);
 }
 
 const SUMMARY_PROMPT = `You are a summarization function. Produce a compact, factual digest of the conversation provided to you, for use as background context when assisting with *other, related* conversations.
