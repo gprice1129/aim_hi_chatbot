@@ -89,7 +89,7 @@ const _GRANT_REVIEW_MODES = Object.freeze({
   [GrantReviewMode.STANDARD]: {
     name: "Standard Proposal Review",
     description: "Comprehensive analysis of proposal alignment with RFA requirements",
-    prompt: "Please provide an executive summary review of my proposal, focusing on strategic impact, innovation potential, and alignment with funding priorities.",
+    prompt: "Please review my proposal against the RFA requirements. Analyze the alignment, identify any gaps, and provide specific recommendations for improvement.",
     context: `You are an expert NIH grant reviewer with deep knowledge of biomedical research funding. You have access to the RFA and proposal documents for this conversation.
 
 RFA Requirements:
@@ -125,7 +125,7 @@ You can reference the conversation history to build on previous analysis and pro
   [GrantReviewMode.SUMMARY]: {
     name: "Executive Summary Review",
     description: "High-level strategic analysis focusing on impact and innovation",
-    prompt: "Please conduct a technical deep-dive review of my proposal, analyzing methodology, feasibility, and technical approach in detail.",
+    prompt: "Please provide an executive summary review of my proposal, focusing on strategic impact, innovation potential, and alignment with funding priorities.",
     context: `You are a senior NIH grant reviewer and strategic advisor with expertise in evaluating research proposals from a high-level strategic perspective. You have access to the RFA and proposal documents for this conversation.
 
 RFA Requirements:
@@ -159,7 +159,7 @@ You can reference the conversation history to build on previous analysis and pro
   [GrantReviewMode.TECHNICAL]: {
     name: "Technical Deep Dive Review",
     description: "Detailed technical analysis with methodology and feasibility focus",
-    prompt: "Please provide a comprehensive NIH-style critique of my proposal with scoring according to the NIH rubric, including detailed analysis of significance, investigators, innovation, approach, environment, and overall impact.",
+    prompt: "Please conduct a technical deep-dive review of my proposal, analyzing methodology, feasibility, and technical approach in detail.",
     context: `You are a technical NIH grant reviewer with deep expertise in research methodology, experimental design, and technical feasibility. You have access to the RFA and proposal documents for this conversation.
 
 RFA Requirements:
@@ -195,7 +195,7 @@ You can reference the conversation history to build on previous analysis and pro
   [GrantReviewMode.SCORED]: {
     name: "Standard Review 2",
     description: "Mighty Reviewer - Comprehensive NIH-style critique with scoring",
-    prompt: "Please provide a comprehensive NIH standing-study-section review of my Specific Aims page, including numeric scores and detailed feedback following the structured format.",
+    prompt:  "Please provide a comprehensive NIH-style critique of my proposal with scoring according to the NIH rubric, including detailed analysis of significance, investigators, innovation, approach, environment, and overall impact.",
     context: `You are a simulated grant reviewer for an NIH proposal. You will write a critique and score the grant according to the NIH rubric and format your reply in well-formatted markdown.
 
 RFA Requirements:
