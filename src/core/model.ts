@@ -1,6 +1,9 @@
 export {
   ModelMessage,
   ModelEffort,
+  ModelThinking,
+  ModelCaching,
+  ModelOutputLimit,
   ModelOpts,
   Model,
 }
@@ -8,11 +11,17 @@ export {
 import { Anthropic } from "@anthropic-ai/sdk";
 import {
   AnthropicModelEffort,
+  AnthropicModelThinking,
+  AnthropicModelCaching,
+  AnthropicModelOutputLimit,
   AnthropicModelOpts } from "#model/anthropic.js";
 import { Memory } from "#core/memory.js";
 
 type ModelMessage = Anthropic.Message;
 type ModelEffort = AnthropicModelEffort;
+type ModelThinking = AnthropicModelThinking;
+type ModelCaching = AnthropicModelCaching;
+type ModelOutputLimit = AnthropicModelOutputLimit;
 type ModelOpts = AnthropicModelOpts;
 interface Model {
   str_to_memory(arg0: string): Memory;

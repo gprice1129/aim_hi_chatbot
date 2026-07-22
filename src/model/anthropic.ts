@@ -1,6 +1,11 @@
 export {
   AnthropicModelEffortScale,
   AnthropicModelEffort,
+  AnthropicModelThinkingMode,
+  AnthropicModelThinking,
+  AnthropicModelCacheTtl,
+  AnthropicModelCaching,
+  AnthropicModelOutputLimit,
   AnthropicModelType,
   AnthropicModelOpts,
   AnthropicModel,
@@ -24,6 +29,26 @@ enum AnthropicModelEffortScale {
   Max = "max"
 }
 type AnthropicModelEffort = AnthropicModelEffortScale | null;
+enum AnthropicModelThinkingMode {
+  Adaptive = "adaptive",
+  Enabled = "enabled",
+  Disabled = "disabled",
+}
+// null omits the thinking parameter entirely. Which configs a model accepts
+// varies by model; see validate_config.
+type AnthropicModelThinking =
+  | { type: AnthropicModelThinkingMode.Adaptive }
+  | { type: AnthropicModelThinkingMode.Enabled, budget_tokens: number }
+  | { type: AnthropicModelThinkingMode.Disabled }
+  | null;
+enum AnthropicModelCacheTtl {
+  FiveMinutes = "5m",
+  OneHour = "1h",
+}
+// Prompt-cache TTL for the request prefix; null disables caching.
+type AnthropicModelCaching = AnthropicModelCacheTtl | null;
+// Hard cap on output tokens (thinking + text) per response.
+type AnthropicModelOutputLimit = number;
 enum AnthropicModelType {
   Haiku = "claude-haiku-4-5",
   Opus = "claude-opus-4-7",
@@ -39,27 +64,93 @@ enum AnthropicContentType {
 }
 interface AnthropicModelOpts {
   effort?: AnthropicModelEffort;
+  thinking?: AnthropicModelThinking;
+  caching?: AnthropicModelCaching;
   system_prompt?: string;
-  max_tokens?: number;
+  max_tokens?: AnthropicModelOutputLimit;
+}
+
+// The API rejects thinking budgets below this floor.
+const MIN_THINKING_BUDGET = 1024;
+
+/*
+ * (AnthropicModelType, AnthropicModelEffort, AnthropicModelThinking,
+ *  AnthropicModelOutputLimit) => void
+ * Throws on parameter combinations the API is known to reject, so
+ * misconfiguration surfaces as a developer error at the call site instead of
+ * an opaque 400 at request time.
+ * Pure
+ * Private
+ */
+function validate_config(
+    type: AnthropicModelType,
+    effort: AnthropicModelEffort,
+    thinking: AnthropicModelThinking,
+    max_tokens: AnthropicModelOutputLimit,
+): void {
+  if (!Number.isInteger(max_tokens) || max_tokens < 1) {
+    throw new Error(
+      `AnthropicModel config: max_tokens must be a positive integer, got ${max_tokens}`);
+  }
+  if (null !== effort && AnthropicModelType.Haiku === type) {
+    throw new Error(
+      `AnthropicModel config: ${type} rejects the effort parameter; leave effort unset`);
+  }
+  if (null === thinking) return;
+  switch (thinking.type) {
+    case AnthropicModelThinkingMode.Adaptive:
+      if (AnthropicModelType.Haiku === type) {
+        throw new Error(
+          `AnthropicModel config: ${type} does not support adaptive thinking; `
+          + `use ${AnthropicModelThinkingMode.Enabled} with a budget_tokens`);
+      }
+      break;
+    case AnthropicModelThinkingMode.Enabled:
+      if (AnthropicModelType.Opus === type) {
+        throw new Error(
+          `AnthropicModel config: ${type} rejects budget_tokens thinking; `
+          + `use ${AnthropicModelThinkingMode.Adaptive}`);
+      }
+      if (thinking.budget_tokens < MIN_THINKING_BUDGET) {
+        throw new Error(
+          `AnthropicModel config: thinking budget_tokens must be >= `
+          + `${MIN_THINKING_BUDGET}, got ${thinking.budget_tokens}`);
+      }
+      if (thinking.budget_tokens >= max_tokens) {
+        throw new Error(
+          `AnthropicModel config: thinking budget_tokens `
+          + `(${thinking.budget_tokens}) must be < max_tokens (${max_tokens})`);
+      }
+      break;
+    case AnthropicModelThinkingMode.Disabled:
+      break;
+  }
 }
 
 class AnthropicModel implements Model {
   private _client: Anthropic;
   private _type: AnthropicModelType;
   private _effort: AnthropicModelEffort;
-  private _max_tokens: number;
+  private _thinking: AnthropicModelThinking;
+  private _caching: AnthropicModelCaching;
+  private _max_tokens: AnthropicModelOutputLimit;
   constructor(
       endpoint: Endpoint,
       type: AnthropicModelType,
       effort: AnthropicModelEffort = null,
-      max_tokens: number = 1028,
+      max_tokens: AnthropicModelOutputLimit = 1028,
+      thinking: AnthropicModelThinking = null,
+      caching: AnthropicModelCaching = null,
   ) {
+    validate_config(type, effort, thinking, max_tokens);
     this._client = new Anthropic({
       apiKey: endpoint.api_key,
       baseURL: endpoint.base_url,
     });
     this._type = type;
     this._effort = effort;
+    this._thinking = thinking;
+    this._caching = caching;
     this._max_tokens = max_tokens;
   }
 
@@ -71,14 +162,27 @@ class AnthropicModel implements Model {
   }
 
   public async gen_message(memories: Anthropic.MessageParam[], opts: AnthropicModelOpts): Promise<Anthropic.Message> {
-    // Only send output_config when an effort is set: some models (e.g. Haiku)
-    // reject the effort parameter outright, so an unset effort must omit it.
-    const effort = opts.effort ?? this._effort ?? undefined;
+    // A null parameter is unset and must be omitted from the request: some
+    // models reject parameters outright (e.g. Haiku rejects effort), so
+    // "unset" cannot be expressed as a value on the wire.
+    const effort = opts.effort ?? this._effort;
+    const thinking = opts.thinking ?? this._thinking;
+    const caching = opts.caching ?? this._caching;
+    const max_tokens = opts.max_tokens ?? this._max_tokens;
+    // Re-validate here: per-call opts can produce a combination the
+    // constructor never saw.
+    validate_config(this._type, effort, thinking, max_tokens);
     return await this._client.messages.create({
       model: this._type,
-      max_tokens: opts.max_tokens ?? this._max_tokens,
+      max_tokens: max_tokens,
       system: opts.system_prompt,
-      ...(effort ? { output_config: { effort } } : {}),
+      ...(null !== effort ? { output_config: { effort } } : {}),
+      ...(null !== thinking ? { thinking } : {}),
+      // Top-level cache_control marks the last cacheable block of the request
+      // prefix (system prompt + messages) for prompt caching.
+      ...(null !== caching
+        ? { cache_control: { type: "ephemeral", ttl: caching } }
+        : {}),
       messages: memories,
     });
   }
