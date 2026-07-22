@@ -16,7 +16,8 @@
     "build"
   ],
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "test": "tsc -b && node --test \"test/unit/**/*.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
