@@ -27,6 +27,11 @@ export type {
 export {
   ModelProfile,
   make_model,
+  default_model_params,
+} from "#model/models.js";
+
+export type {
+  ModelParams,
 } from "#model/models.js";
 
 export {
@@ -37,8 +42,18 @@ export type {
   MockModelOpts,
 } from "#model/mock.js";
 
+export {
+  ModelEffortScale,
+  ModelThinkingMode,
+  ModelCacheTtl,
+} from "#core/model.js";
+
 export type {
   Model,
+  ModelEffort,
+  ModelThinking,
+  ModelCaching,
+  ModelOutputLimit,
 } from "#core/model.js";
 
 export type {

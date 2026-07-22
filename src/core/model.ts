@@ -7,6 +7,11 @@ export {
   ModelOpts,
   Model,
 }
+export {
+  AnthropicModelEffortScale as ModelEffortScale,
+  AnthropicModelThinkingMode as ModelThinkingMode,
+  AnthropicModelCacheTtl as ModelCacheTtl,
+} from "#model/anthropic.js";
 
 import { Anthropic } from "@anthropic-ai/sdk";
 import {

@@ -138,7 +138,7 @@ class AnthropicModel implements Model {
       endpoint: Endpoint,
       type: AnthropicModelType,
       effort: AnthropicModelEffort = null,
-      max_tokens: AnthropicModelOutputLimit = 1028,
+      max_tokens: AnthropicModelOutputLimit,
       thinking: AnthropicModelThinking = null,
       caching: AnthropicModelCaching = null,
   ) {
