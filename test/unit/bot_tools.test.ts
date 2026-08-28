@@ -182,6 +182,41 @@ describe("Chatbot tool loop", () => {
     assert.equal(bot.tools(), null);
   });
 
+  it("traces the rounds, the tool calls and their outcomes", async () => {
+    const model = new MockModel({
+      replies: [{ calls: [{ name: "kg_search", input: { q: "phi" } }] }, "done"],
+    });
+    const bot = new Chatbot({ model, tools: new ToolRegistry([recorder("kg_search", "RESULT")]) });
+
+    await bot.gen_reply({});
+
+    const trace = bot.trace();
+    assert.equal(trace.rounds, 2);
+    assert.deepEqual(trace.tool_calls, [
+      { round: 0, name: "kg_search", input: { q: "phi" }, ok: true, result: "RESULT" },
+    ]);
+    // The mock reports zero tokens; the point is that usage is summed at all.
+    assert.deepEqual(trace.usage, { input_tokens: 0, output_tokens: 0 });
+  });
+
+  it("traces a failed tool call with its error, and a plain reply with none", async () => {
+    const model = new MockModel({
+      replies: [{ calls: [{ name: "kg_serch", input: {} }] }, "recovered", "plain"],
+    });
+    const bot = new Chatbot({ model, tools: new ToolRegistry([recorder("kg_search")]) });
+
+    await bot.gen_reply({});
+    const failed = bot.trace();
+    assert.equal(failed.tool_calls[0].ok, false);
+    assert.match(failed.tool_calls[0].result, /Unknown tool 'kg_serch'/);
+
+    // Each reply starts a fresh trace.
+    await bot.gen_reply({});
+    assert.deepEqual(bot.trace(), {
+      rounds: 1, tool_calls: [], usage: { input_tokens: 0, output_tokens: 0 },
+    });
+  });
+
   it("classifies a provider error during a tool loop as unavailable", async () => {
     const model = new MockModel({
       replies: [{ calls: [{ name: "kg_search", input: { q: "x" } }] }],

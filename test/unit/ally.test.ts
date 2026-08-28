@@ -64,6 +64,16 @@ describe("Ally.respond (via MockModel)", () => {
     assert.deepEqual(mock.calls()[0].opts.tools?.map((t) => t.name), ["kg_search"]);
   });
 
+  it("exposes the trace of its last respond", async () => {
+    const mock = new MockModel({ reply: "ok" });
+    const ally = make_ally(mock);
+
+    await ally.respond(history_of(), no_project(), "hello");
+
+    assert.equal(ally.trace().rounds, 1);
+    assert.deepEqual(ally.trace().tool_calls, []);
+  });
+
   it("offers no tools when given none", async () => {
     const mock = new MockModel({ reply: "ok" });
 

@@ -8,6 +8,7 @@ import { Model, ModelOpts, ModelMessage } from "#core/model.js";
 import { Memory } from "#core/memory.js";
 import { BotFailure, type BotReply } from "#core/result.js";
 import { ToolRegistry } from "#core/tool.js";
+import { empty_trace, note_model_call, note_tool_results, type BotTrace } from "#core/trace.js";
 
 // How many rounds of tool execution one reply may take before the bot gives up.
 const DEFAULT_MAX_TOOL_ROUNDS = 8;
@@ -34,6 +35,7 @@ class Chatbot {
   private _memories: Memory[];
   private _tools: ToolRegistry | null;
   private _max_tool_rounds: number;
+  private _last_trace: BotTrace;
 
   constructor(opts: ChatbotOpts) {
     this._model = opts.model;
@@ -42,6 +44,7 @@ class Chatbot {
     this._memories = opts.init_memory ?? []; // TODO: [memory] breaks abstraction
     this._tools = opts.tools ?? null;
     this._max_tool_rounds = opts.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS;
+    this._last_trace = empty_trace();
   }
 
   /*
@@ -134,6 +137,16 @@ class Chatbot {
   }
 
   /*
+   * (void) => BotTrace
+   * What happened during the most recent gen_reply. Empty before the first.
+   * Pure
+   * Public
+   */
+  public trace(): BotTrace {
+    return this._last_trace;
+  }
+
+  /*
    * (ModelOpts) => BotReply
    * Generate a message and return a usable reply or a classified failure.
    *
@@ -146,6 +159,9 @@ class Chatbot {
     const registry = this._tools;
     const offered = null === registry ? [] : registry.tools();
     const call_opts = offered.length > 0 ? { ...opts, tools: offered } : opts;
+    // Assigned before the loop so an early return still leaves what happened.
+    const trace = empty_trace();
+    this._last_trace = trace;
 
     for (let round = 0; ; round++) {
       let msg: ModelMessage;
@@ -154,6 +170,7 @@ class Chatbot {
       } catch (err) {
         return { ok: false, error: { failure: BotFailure.UNAVAILABLE, cause: err } };
       }
+      note_model_call(trace, msg);
 
       if (null === registry || !this._model.wants_tools(msg)) {
         const content = this.extract_content(msg);
@@ -173,6 +190,7 @@ class Chatbot {
 
       this.add_memory(this._model.msg_to_memory(msg));
       const results = await registry.run_all(calls);
+      note_tool_results(trace, round, calls, results);
       this.add_memory(this._model.tool_results_to_memory(results));
     }
   }

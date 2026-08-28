@@ -8,6 +8,7 @@ import type { HistorySource, ProjectContextSource } from "#core/context.js";
 import type { Model } from "#core/model.js";
 import type { ToolRegistry } from "#core/tool.js";
 import type { BotReply } from "#core/result.js";
+import type { BotTrace } from "#core/trace.js";
 
 class Ally {
   private _bot: Chatbot;
@@ -33,6 +34,11 @@ class Ally {
       this._bot.add_memory(turn);
     }
     return this._bot.gen_reply({ system_prompt: system });
+  }
+
+  // What happened during the most recent respond: rounds, tool calls, tokens.
+  trace(): BotTrace {
+    return this._bot.trace();
   }
 }
 
