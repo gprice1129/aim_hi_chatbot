@@ -22,11 +22,14 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@types/node": "^25.5.0",
+    "common": "*",
+    "knowledge_graph": "*",
     "typescript": "^6.0.2"
   },
   "imports": {
     "#core/*": "./build/core/*",
     "#model/*": "./build/model/*",
-    "#bot/*": "./build/bot/*"
+    "#bot/*": "./build/bot/*",
+    "#tools/*": "./build/tools/*"
   }
 }

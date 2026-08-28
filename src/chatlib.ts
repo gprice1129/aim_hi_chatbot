@@ -1,3 +1,7 @@
+/*
+ * The exposed interface of the chatbot package.
+ */
+
 export {
   make_ally,
 } from "#bot/ally.js";
@@ -5,7 +9,6 @@ export {
 export {
   make_grant_reviewer,
   GrantReviewMode,
-  GrantReviewContent,
 } from "#bot/grant_reviewer.js";
 
 export {
@@ -38,10 +41,6 @@ export {
   MockModel,
 } from "#model/mock.js";
 
-export type {
-  MockModelOpts,
-} from "#model/mock.js";
-
 export {
   ModelEffortScale,
   ModelThinkingMode,
@@ -53,12 +52,9 @@ export type {
   ModelEffort,
   ModelThinking,
   ModelCaching,
-  ModelOutputLimit,
 } from "#core/model.js";
 
 export type {
-  APIKey,
-  BaseURL,
   Endpoint,
 } from "#core/types.js";
 
@@ -71,12 +67,3 @@ export type {
   ProjectContextSource,
   ProjectContext,
 } from "#core/context.js";
-
-export {
-  estimate_tokens,
-  DEFAULT_CHARS_PER_TOKEN,
-} from "#core/tokens.js";
-
-export type {
-  TokenEstimator,
-} from "#core/tokens.js";

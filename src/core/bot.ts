@@ -7,6 +7,10 @@ export {
 import { Model, ModelOpts, ModelMessage } from "#core/model.js";
 import { Memory } from "#core/memory.js";
 import { BotFailure, type BotReply } from "#core/result.js";
+import { ToolRegistry } from "#core/tool.js";
+
+// How many rounds of tool execution one reply may take before the bot gives up.
+const DEFAULT_MAX_TOOL_ROUNDS = 8;
 
 interface ChatbotMode {
   name: string;
@@ -18,6 +22,9 @@ interface ChatbotOpts {
   model: Model;
   modes?: Record<string, ChatbotMode>;
   init_memory?: Memory[];
+  // Tools this bot may call. Omit for a bot that only converses.
+  tools?: ToolRegistry;
+  max_tool_rounds?: number;
 }
 
 class Chatbot {
@@ -25,12 +32,16 @@ class Chatbot {
   private _modes: Record<string, ChatbotMode> | null;
   private _current_mode: string | null;
   private _memories: Memory[];
+  private _tools: ToolRegistry | null;
+  private _max_tool_rounds: number;
 
   constructor(opts: ChatbotOpts) {
     this._model = opts.model;
     this._modes = opts.modes ?? null;
     this._current_mode = null;
     this._memories = opts.init_memory ?? []; // TODO: [memory] breaks abstraction
+    this._tools = opts.tools ?? null;
+    this._max_tool_rounds = opts.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS;
   }
 
   /*
@@ -114,20 +125,55 @@ class Chatbot {
   }
 
   /*
+   * (void) => ToolRegistry | null
+   * Pure
+   * Public
+   */
+  public tools(): ToolRegistry | null {
+    return this._tools;
+  }
+
+  /*
    * (ModelOpts) => BotReply
    * Generate a message and return a usable reply or a classified failure.
-   * Side Effect: network call to the model
+   *
+   * When the bot has tools, this is the agentic loop for tool usage.
+   * It returns only on a turn that stopped to reply or on the round cap.
+   * Side Effect: network calls to the model; runs tools; mutates memory state
    * Public
    */
   public async gen_reply(opts: ModelOpts): Promise<BotReply> {
-    let msg: ModelMessage;
-    try {
-      msg = await this.gen_message(opts);
-    } catch (err) {
-      return { ok: false, failure: BotFailure.UNAVAILABLE, cause: err };
+    const registry = this._tools;
+    const offered = null === registry ? [] : registry.tools();
+    const call_opts = offered.length > 0 ? { ...opts, tools: offered } : opts;
+
+    for (let round = 0; ; round++) {
+      let msg: ModelMessage;
+      try {
+        msg = await this.gen_message(call_opts);
+      } catch (err) {
+        return { ok: false, error: { failure: BotFailure.UNAVAILABLE, cause: err } };
+      }
+
+      if (null === registry || !this._model.wants_tools(msg)) {
+        const content = this.extract_content(msg);
+        if (false === content) {
+          return { ok: false, error: { failure: BotFailure.INCOMPLETE } };
+        }
+        return { ok: true, value: content };
+      }
+
+      const calls = this._model.extract_tool_calls(msg);
+      if (0 === calls.length) {
+        return { ok: false, error: { failure: BotFailure.INCOMPLETE } };
+      }
+      if (round >= this._max_tool_rounds) {
+        return { ok: false, error: { failure: BotFailure.TOOL_LIMIT } };
+      }
+
+      this.add_memory(this._model.msg_to_memory(msg));
+      const results = await registry.run_all(calls);
+      this.add_memory(this._model.tool_results_to_memory(results));
     }
-    const content = this.extract_content(msg);
-    if (false === content) return { ok: false, failure: BotFailure.INCOMPLETE };
-    return { ok: true, content };
   }
 }

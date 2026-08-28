@@ -7,5 +7,9 @@
     "rootDir": "./src",
     "outDir": "./build"
   },
+  "references": [
+    { "path": "../common" },
+    { "path": "../knowledge_graph" }
+  ],
   "include": ["src/**/*.ts"]
 }

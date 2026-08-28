@@ -18,7 +18,7 @@ describe("Ally.respond (via MockModel)", () => {
     const mock = new MockModel({ reply: "ally says hi" });
     const ally = make_ally(mock);
     const reply = await ally.respond(history_of(), no_project(), "hello");
-    assert.deepEqual(reply, { ok: true, content: ["ally says hi"] });
+    assert.deepEqual(reply, { ok: true, value: ["ally says hi"] });
   });
 
   it("generates once, under the Ally system prompt, with history then the live turn last", async () => {

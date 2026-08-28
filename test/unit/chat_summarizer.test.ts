@@ -13,7 +13,7 @@ describe("ChatSummarizer.summarize (via MockModel)", () => {
       { role: "user", content: "let's standardize on postgres" },
       { role: "assistant", content: "agreed, postgres it is" },
     ]);
-    assert.deepEqual(reply, { ok: true, content: ["a short, factual digest"] });
+    assert.deepEqual(reply, { ok: true, value: ["a short, factual digest"] });
   });
 
   it("composes the whole transcript under SUMMARY_PROMPT in a single call", async () => {

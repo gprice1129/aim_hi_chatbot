@@ -15,6 +15,14 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { Endpoint } from "#core/types.js";
 import { Model } from "#core/model.js";
 import { Memory } from "#core/memory.js";
+import {
+  ToolParamType,
+  type Tool,
+  type ToolCall,
+  type ToolParam,
+  type ToolResult,
+} from "#core/tool.js";
+import { as_tool_input } from "#core/tool_input.js";
 
 enum AnthropicStopReason {
   END_TURN = 'end_turn',
@@ -68,6 +76,7 @@ interface AnthropicModelOpts {
   caching?: AnthropicModelCaching;
   system_prompt?: string;
   max_tokens?: AnthropicModelOutputLimit;
+  tools?: Tool[];
 }
 
 // The API rejects thinking budgets below this floor.
@@ -172,10 +181,12 @@ class AnthropicModel implements Model {
     // Re-validate here: per-call opts can produce a combination the
     // constructor never saw.
     validate_config(this._type, effort, thinking, max_tokens);
+    const tools = opts.tools ?? [];
     return await this._client.messages.create({
       model: this._type,
       max_tokens: max_tokens,
       system: opts.system_prompt,
+      ...(tools.length > 0 ? { tools: tools.map(_to_anthropic_tool) } : {}),
       ...(null !== effort ? { output_config: { effort } } : {}),
       ...(null !== thinking ? { thinking } : {}),
       // Top-level cache_control marks the last cacheable block of the request
@@ -192,7 +203,7 @@ class AnthropicModel implements Model {
     const stop_reason = msg.stop_reason;
     if (AnthropicStopReason.END_TURN !== stop_reason) {
       console.error(`Error: API message extraction failed. Stop reason: ${stop_reason}`);
-      return false; 
+      return false;
     }
     const text_blocks = [];
     for (let i = 0; i < msg.content.length; i++) {
@@ -203,4 +214,104 @@ class AnthropicModel implements Model {
     }
     return text_blocks;
   }
+
+  /*
+   * (Anthropic.Message) => boolean
+   * Whether the turn stopped to call tools rather than to reply.
+   * Pure
+   * Public
+   */
+  public wants_tools(msg: Anthropic.Message): boolean {
+    return AnthropicStopReason.TOOL === msg.stop_reason;
+  }
+
+  /*
+   * (Anthropic.Message) => ToolCall[]
+   * The tool_use blocks of a turn, as provider-agnostic calls.
+   * Pure
+   * Public
+   */
+  public extract_tool_calls(msg: Anthropic.Message): ToolCall[] {
+    const calls: ToolCall[] = [];
+    for (const block of msg.content) {
+      if (AnthropicContentType.TOOL !== block.type) continue;
+      calls.push({ id: block.id, name: block.name, input: as_tool_input(block.input) });
+    }
+    return calls;
+  }
+
+  /*
+   * (Anthropic.Message) => Memory
+   * The assistant turn, replayed verbatim. The API requires each tool_use block
+   * to be present in the transcript before it will accept the tool_result that
+   * answers it, so the whole content array is kept rather than just its text.
+   * Pure
+   * Public
+   */
+  public msg_to_memory(msg: Anthropic.Message): Memory {
+    return {
+      role: AnthropicRole.Assistant,
+      content: msg.content as Anthropic.ContentBlockParam[],
+    };
+  }
+
+  /*
+   * (ToolResult[]) => Memory
+   * Tool results as the user turn that answers a tool request. A failure is
+   * sent as an is_error result so the model can see what went wrong to choose
+   * a different call.
+   * Pure
+   * Public
+   */
+  public tool_results_to_memory(results: ToolResult[]): Memory {
+    return {
+      role: AnthropicRole.User,
+      content: results.map((result): Anthropic.ToolResultBlockParam => ({
+        type: "tool_result",
+        tool_use_id: result.id,
+        content: result.ok ? result.value : result.error,
+        ...(result.ok ? {} : { is_error: true }),
+      })),
+    };
+  }
+}
+
+/*
+ * (Tool) => Anthropic.Tool
+ * Translate a Tool declaration into the API's tool schema.
+ * Pure
+ * Private
+ */
+function _to_anthropic_tool(tool: Tool): Anthropic.Tool {
+  const properties: Record<string, unknown> = {};
+  for (const [name, param] of Object.entries(tool.schema.properties)) {
+    properties[name] = _to_json_schema(param);
+  }
+  return {
+    name: tool.name,
+    description: tool.description,
+    input_schema: {
+      type: "object",
+      properties,
+      required: tool.schema.required,
+    },
+  };
+}
+
+/*
+ * (ToolParam) => Record<string, unknown>
+ * Translate one parameter into its JSON Schema fragment. An Array parameter
+ * with no declared element type is left unconstrained rather than guessed at.
+ * Pure
+ * Private
+ */
+function _to_json_schema(param: ToolParam): Record<string, unknown> {
+  return {
+    type: param.type,
+    description: param.description,
+    ...(undefined !== param.choices ? { enum: param.choices } : {}),
+    ...(ToolParamType.Array === param.type && undefined !== param.items
+      ? { items: _to_json_schema(param.items) }
+      : {}),
+  };
 }
