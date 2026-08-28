@@ -18,7 +18,7 @@ import { as_tool_input } from "#core/tool_input.js";
  * MockModel is a deterministic, offline Model double. It performs no network
  * I/O: gen_message returns a canned assistant message, so the bots, routes, and
  * the webserver can be exercised without a real provider. The host selects it
- * in test mode (APP_ENV=test); unit tests construct it directly.
+ * under MODEL_MODE=mock; unit tests construct it directly.
  *
  * By default every call returns the same `reply`. Pass `replies` to script a
  * multi-turn sequence (consumed in order, then falling back to `reply`). Each
