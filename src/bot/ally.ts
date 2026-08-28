@@ -6,6 +6,7 @@ import { Chatbot } from "#core/bot.js";
 import { ContextAssembler } from "#core/context.js";
 import type { HistorySource, ProjectContextSource } from "#core/context.js";
 import type { Model } from "#core/model.js";
+import type { ToolRegistry } from "#core/tool.js";
 import type { BotReply } from "#core/result.js";
 
 class Ally {
@@ -36,12 +37,13 @@ class Ally {
 }
 
 /*
- * Signature: (Model) => Ally
+ * Signature: (Model, ToolRegistry?) => Ally
+ * Without tools Ally only converses.
  * Pure
  * Public
  */
-function make_ally(model: Model): Ally {
-  const bot = new Chatbot({ model });
+function make_ally(model: Model, tools?: ToolRegistry): Ally {
+  const bot = new Chatbot({ model, tools });
   return new Ally(bot, new ContextAssembler());
 }
 

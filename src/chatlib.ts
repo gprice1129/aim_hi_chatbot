@@ -20,6 +20,14 @@ export type {
 } from "#bot/chat_summarizer.js";
 
 export {
+  ToolRegistry,
+} from "#core/tool.js";
+
+export {
+  make_knowledge_graph_tools,
+} from "#tools/knowledge_graph.js";
+
+export {
   BotFailure,
 } from "#core/result.js";
 
