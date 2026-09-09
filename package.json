@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "private": true,
+  "engines": {
+    "node": ">=22.18"
+  },
   "type": "module",
   "main": "./build/chatlib.js",
   "types": "./build/chatlib.d.ts",
