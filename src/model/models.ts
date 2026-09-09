@@ -17,6 +17,7 @@ import {
   AnthropicModel,
   AnthropicModelType,
   AnthropicModelEffortScale,
+  AnthropicModelThinkingMode,
 } from "#model/anthropic.js";
 
 /*
@@ -26,6 +27,8 @@ import {
 enum ModelProfile {
   // Cheap, low-latency conversational model.
   Fast = "fast",
+  // Capable conversational model, for chat that must follow tool directives.
+  Chat = "chat",
   // Heavy reasoning model with a large output budget for one-shot analysis.
   Deep = "deep",
   // Cheap model with a small output cap for out-of-band chat summarization
@@ -43,6 +46,7 @@ interface ModelParams {
 
 const _PROFILE_TYPE: Record<ModelProfile, AnthropicModelType> = {
   [ModelProfile.Fast]: AnthropicModelType.Haiku,
+  [ModelProfile.Chat]: AnthropicModelType.Opus,
   [ModelProfile.Deep]: AnthropicModelType.Opus,
   [ModelProfile.Summary]: AnthropicModelType.Haiku,
 };
@@ -50,6 +54,10 @@ const _PROFILE_TYPE: Record<ModelProfile, AnthropicModelType> = {
 const _PROFILE_PARAMS: Record<ModelProfile, ModelParams> = {
   [ModelProfile.Fast]: {
     effort: null, thinking: null, caching: null, max_tokens: 8192 },
+  [ModelProfile.Chat]: {
+    effort: null,
+    thinking: { type: AnthropicModelThinkingMode.Adaptive },
+    caching: null, max_tokens: 8192 },
   [ModelProfile.Deep]: {
     effort: AnthropicModelEffortScale.Max,
     thinking: null, caching: null, max_tokens: 16384 },
