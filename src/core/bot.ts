@@ -16,7 +16,8 @@ const DEFAULT_MAX_TOOL_ROUNDS = 8;
 interface ChatbotMode {
   name: string;
   description: string;
-  prompt: string;
+  // The turn that opens a conversation in this mode, for modes that are started.
+  prompt: string | null;
   context: string;
 };
 interface ChatbotOpts {
