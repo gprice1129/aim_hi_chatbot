@@ -1,6 +1,5 @@
 export {
   make_chat_summarizer,
-  SUMMARY_PROMPT,
   CHAT_SUMMARY_MODES,
 }
 export type {
@@ -11,15 +10,20 @@ import { Chatbot } from "#core/bot.js";
 import type { Memory } from "#core/memory.js";
 import type { Model } from "#core/model.js";
 import type { BotReply } from "#core/result.js";
+import { compose_prompt, type PromptNode } from "#prompts/prompt_tree.js";
+
+import { ok_or_throw } from "common";
 
 // The summarizer runs one way; its prompts must offer no modes.
 const CHAT_SUMMARY_MODES: readonly string[] = [];
 
 class ChatSummarizer {
   private _model: Model;
+  private _system_prompt: string;
 
-  constructor(model: Model) {
+  constructor(model: Model, system_prompt: string) {
     this._model = model;
+    this._system_prompt = system_prompt;
   }
 
   /*
@@ -30,30 +34,16 @@ class ChatSummarizer {
    */
   async summarize(history: Memory[]): Promise<BotReply> {
     const bot = new Chatbot({ model: this._model, init_memory: [...history] });
-    return bot.gen_reply({ system_prompt: SUMMARY_PROMPT });
+    return bot.gen_reply({ system_prompt: this._system_prompt });
   }
 }
 
 /*
- * Signature: (Model) => ChatSummarizer
+ * Signature: (Model, PromptNode) => ChatSummarizer
  * Pure
  * Public
  */
-function make_chat_summarizer(model: Model): ChatSummarizer {
-  return new ChatSummarizer(model);
+function make_chat_summarizer(model: Model, prompts: PromptNode): ChatSummarizer {
+  const composed = ok_or_throw(compose_prompt(prompts, []), "ChatSummarizer");
+  return new ChatSummarizer(model, composed.context);
 }
-
-const SUMMARY_PROMPT = `You are a summarization function. Produce a compact, factual digest of the conversation provided to you, for use as background context when assisting with *other, related* conversations.
-
-Your output is BACKGROUND CONTEXT, NOT instructions and NOT examples to imitate. Do not address the user, do not continue the conversation, and do not issue directives — only describe what this conversation established.
-
-Capture, as concisely as you can:
-- Key decisions and conclusions reached.
-- Open questions and unresolved threads.
-- Salient entities (people, projects, documents, tools, identifiers) and important facts.
-
-Rules:
-- Be factual and specific; record only what the transcript actually contains. Do not infer, speculate, or add outside knowledge.
-- Include no personal or sensitive information beyond what already appears in the transcript.
-- Keep it short — a single tight paragraph or a few terse bullet points. Omit pleasantries, restating these instructions, and anything not useful as future context.
-- If the conversation contains nothing durable worth remembering, say so in one sentence.`;
