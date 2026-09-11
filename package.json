@@ -33,6 +33,7 @@
     "#core/*": "./build/core/*",
     "#model/*": "./build/model/*",
     "#bot/*": "./build/bot/*",
-    "#tools/*": "./build/tools/*"
+    "#tools/*": "./build/tools/*",
+    "#prompts/*": "./build/prompts/*"
   }
 }
