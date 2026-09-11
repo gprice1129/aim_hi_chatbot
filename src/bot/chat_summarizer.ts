@@ -1,6 +1,7 @@
 export {
   make_chat_summarizer,
   SUMMARY_PROMPT,
+  CHAT_SUMMARY_MODES,
 }
 export type {
   ChatSummarizer,
@@ -10,6 +11,9 @@ import { Chatbot } from "#core/bot.js";
 import type { Memory } from "#core/memory.js";
 import type { Model } from "#core/model.js";
 import type { BotReply } from "#core/result.js";
+
+// The summarizer runs one way; its prompts must offer no modes.
+const CHAT_SUMMARY_MODES: readonly string[] = [];
 
 class ChatSummarizer {
   private _model: Model;

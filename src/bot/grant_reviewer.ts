@@ -2,6 +2,7 @@ export {
   make_grant_reviewer,
   GrantReviewMode,
   GrantReviewContent,
+  GRANT_REVIEW_MODES,
 }
 
 import { Chatbot } from "#core/bot.js";
@@ -81,6 +82,9 @@ enum GrantReviewMode {
   SCORED = "scored",
   AIMS = "aims"
 }
+
+// The modes the reviewer's prompts must offer: exactly those its code selects among.
+const GRANT_REVIEW_MODES: readonly string[] = Object.values(GrantReviewMode);
 
 const _GRANT_REVIEW_MODES = Object.freeze({
   /* Standard Review

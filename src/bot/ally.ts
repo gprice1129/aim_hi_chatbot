@@ -1,5 +1,7 @@
 export {
   make_ally,
+  ALLY_MODES,
+  ALLY_DEFAULT_MODE,
 }
 
 import { Chatbot } from "#core/bot.js";
@@ -9,6 +11,12 @@ import type { Model } from "#core/model.js";
 import type { ToolRegistry } from "#core/tool.js";
 import type { BotReply } from "#core/result.js";
 import type { BotTrace } from "#core/trace.js";
+
+// The mode Ally is in until asked to be in another.
+const ALLY_DEFAULT_MODE = "general";
+
+// The modes Ally's prompts must offer.
+const ALLY_MODES: readonly string[] = [ALLY_DEFAULT_MODE];
 
 class Ally {
   private _bot: Chatbot;
