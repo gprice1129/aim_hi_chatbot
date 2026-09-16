@@ -213,7 +213,7 @@ describe("Chatbot tool loop", () => {
     // Each reply starts a fresh trace.
     await bot.gen_reply({});
     assert.deepEqual(bot.trace(), {
-      rounds: 1, tool_calls: [], usage: { input_tokens: 0, output_tokens: 0 },
+      rounds: 1, tool_calls: [], steps: [], usage: { input_tokens: 0, output_tokens: 0 },
     });
   });
 
@@ -240,5 +240,67 @@ describe("Chatbot tool loop", () => {
 
     assert.equal(reply.ok, false);
     assert.equal(reply.ok ? null : reply.error.failure, BotFailure.UNAVAILABLE);
+  });
+
+  it("streams text and announces each tool round before running it", async () => {
+    const tool = recorder("kg_search");
+    const model = new MockModel({
+      replies: [
+        { text: "Let me look.", calls: [{ name: "kg_search", input: { q: "phi" } }] },
+        "Found it.",
+      ],
+    });
+    const bot = new Chatbot({ model, tools: new ToolRegistry([tool]) });
+    const events: string[] = [];
+
+    await bot.gen_reply({
+      on_text: (text) => events.push(`text:${text}`),
+      on_tool_calls: (calls) => events.push(`tools:${calls.map((c) => c.name)} ran:${tool.seen.length}`),
+    });
+
+    // Announced before the tools run, so a host can show progress while they do.
+    assert.deepEqual(events, ["text:Let me look.", "tools:kg_search ran:0", "text:Found it."]);
+    assert.deepEqual(bot.trace().steps, [
+      { text: "Let me look.", calls: [{ name: "kg_search", input: { q: "phi" }, ok: true }] },
+    ]);
+  });
+
+  it("classifies a reply its host aborted as cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const bot = new Chatbot({ model: new MockModel() });
+
+    const reply = await bot.gen_reply({ signal: controller.signal });
+
+    assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
+  });
+
+  it("cancels while tools run when the host aborts", async () => {
+    const controller = new AbortController();
+    let started!: () => void;
+    const seen_start = new Promise<void>((resolve) => { started = resolve; });
+    const tool = {
+      name: "slow",
+      description: "hangs until the reply is cancelled",
+      schema: { properties: {}, required: [] as string[] },
+      async run() {
+        started();
+        // Never settles; run_all must lose to the abort signal.
+        await new Promise(() => {});
+        return { ok: true as const, value: "done" };
+      },
+    };
+    const model = new MockModel({
+      replies: [{ text: "Working.", calls: [{ name: "slow" }] }, "done"],
+    });
+    const bot = new Chatbot({ model, tools: new ToolRegistry([tool]) });
+
+    const pending = bot.gen_reply({ signal: controller.signal });
+    await seen_start;
+    controller.abort();
+
+    const reply = await pending;
+    assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
+    assert.deepEqual(bot.trace().steps, []);
   });
 });

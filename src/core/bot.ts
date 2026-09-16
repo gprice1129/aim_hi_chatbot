@@ -1,13 +1,14 @@
 export {
   ChatbotOpts,
   ChatbotMode,
+  ReplyStream,
   Chatbot,
 }
 
 import { Model, ModelOpts, ModelMessage } from "#core/model.js";
 import { Memory } from "#core/memory.js";
 import { BotFailure, type BotReply } from "#core/result.js";
-import { ToolRegistry } from "#core/tool.js";
+import { ToolRegistry, type ToolCall } from "#core/tool.js";
 import { empty_trace, note_model_call, note_tool_results, type BotTrace } from "#core/trace.js";
 
 // How many rounds of tool execution one reply may take before the bot gives up.
@@ -28,6 +29,12 @@ interface ChatbotOpts {
   tools?: ToolRegistry;
   max_tool_rounds?: number;
 }
+
+// What a host can observe and control while a reply is generated.
+type ReplyStream = Pick<ModelOpts, "on_text" | "signal"> & {
+  // Receives the calls of a round that stopped to use tools, before they run.
+  on_tool_calls?: (calls: ToolCall[]) => void;
+};
 
 class Chatbot {
   private _model: Model;
@@ -78,7 +85,7 @@ class Chatbot {
    */
   public set_mode(key: string): string | boolean {
     if (null === this._modes) return false;
-    const selected_mode = this._modes[key]; 
+    const selected_mode = this._modes[key];
     if (undefined === selected_mode) return false;
     this._current_mode = key;
     return this._current_mode;
@@ -148,15 +155,17 @@ class Chatbot {
   }
 
   /*
-   * (ModelOpts) => BotReply
+   * (ModelOpts & ReplyStream) => BotReply
    * Generate a message and return a usable reply or a classified failure.
    *
    * When the bot has tools, this is the agentic loop for tool usage.
    * It returns only on a turn that stopped to reply or on the round cap.
+   * Text from every round streams to opts.on_text; opts.on_tool_calls marks
+   * where a round's lead-in ended. Aborting opts.signal ends it as CANCELLED.
    * Side Effect: network calls to the model; runs tools; mutates memory state
    * Public
    */
-  public async gen_reply(opts: ModelOpts): Promise<BotReply> {
+  public async gen_reply(opts: ModelOpts & ReplyStream): Promise<BotReply> {
     const registry = this._tools;
     const offered = null === registry ? [] : registry.tools();
     const call_opts = offered.length > 0 ? { ...opts, tools: offered } : opts;
@@ -169,7 +178,9 @@ class Chatbot {
       try {
         msg = await this.gen_message(call_opts);
       } catch (err) {
-        return { ok: false, error: { failure: BotFailure.UNAVAILABLE, cause: err } };
+        // An abort surfaces as a failed provider call, but it was the host's choice.
+        const failure = opts.signal?.aborted ? BotFailure.CANCELLED : BotFailure.UNAVAILABLE;
+        return { ok: false, error: { failure, cause: err } };
       }
       note_model_call(trace, msg);
 
@@ -189,9 +200,19 @@ class Chatbot {
         return { ok: false, error: { failure: BotFailure.TOOL_LIMIT } };
       }
 
+      opts.on_tool_calls?.(calls);
       this.add_memory(this._model.msg_to_memory(msg));
-      const results = await registry.run_all(calls);
-      note_tool_results(trace, round, calls, results);
+      let results;
+      try {
+        results = await registry.run_all(calls, opts.signal);
+      } catch (err) {
+        // Same as a cancelled provider call: the host asked to stop.
+        if (opts.signal?.aborted) {
+          return { ok: false, error: { failure: BotFailure.CANCELLED, cause: err } };
+        }
+        throw err;
+      }
+      note_tool_results(trace, round, msg, calls, results);
       this.add_memory(this._model.tool_results_to_memory(results));
     }
   }

@@ -5,6 +5,7 @@ export {
 }
 export type {
   BotTrace,
+  TraceStep,
   TraceToolCall,
   TraceUsage,
 }
@@ -25,7 +26,9 @@ import type { ToolCall, ToolInput, ToolResult } from "#core/tool.js";
  * -----------------------------------------------------------------------------
  * A reply carries only the text the model ended with. The trace is how a host
  * can see the tool calls and rounds behind that text, for a debug view or a
- * test that must know whether a tool ran rather than guess from prose.
+ * test that must know whether a tool ran rather than guess from prose. Its
+ * steps are the part fit to show a person: what the model wrote and asked for
+ * in each tool round, without what the tools answered.
  */
 
 // Bodies a tool returns can run to thousands of characters. A trace keeps
@@ -42,6 +45,13 @@ interface TraceToolCall {
   result: string;
 }
 
+// One round that stopped to use tools: the text the model wrote first, then
+// the calls it made and whether each succeeded.
+interface TraceStep {
+  text: string;
+  calls: { name: string; input: ToolInput; ok: boolean }[];
+}
+
 // Tokens across every model call of the turn.
 interface TraceUsage {
   input_tokens: number;
@@ -52,6 +62,7 @@ interface TraceUsage {
 interface BotTrace {
   rounds: number;
   tool_calls: TraceToolCall[];
+  steps: TraceStep[];
   usage: TraceUsage;
 }
 
@@ -63,7 +74,7 @@ interface BotTrace {
  * Public
  */
 function empty_trace(): BotTrace {
-  return { rounds: 0, tool_calls: [], usage: { input_tokens: 0, output_tokens: 0 } };
+  return { rounds: 0, tool_calls: [], steps: [], usage: { input_tokens: 0, output_tokens: 0 } };
 }
 
 /*
@@ -82,13 +93,16 @@ function note_model_call(trace: BotTrace, msg: ModelMessage): void {
 /*
  * Idea: Record a round of tool calls against their results.
  *
- * (BotTrace, number, ToolCall[], ToolResult[]) => void
- * Calls and results correspond by position, as run_all guarantees.
+ * (BotTrace, number, ModelMessage, ToolCall[], ToolResult[]) => void
+ * Calls and results correspond by position, as run_all guarantees. The message
+ * is the turn that asked for the calls; its text is the round's lead-in.
  * Side Effect: mutates the trace
  * Public
  */
 function note_tool_results(
-    trace: BotTrace, round: number, calls: ToolCall[], results: ToolResult[]): void {
+    trace: BotTrace, round: number, msg: ModelMessage,
+    calls: ToolCall[], results: ToolResult[]): void {
+  const step: TraceStep = { text: _text(msg), calls: [] };
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i];
     const result = results[i];
@@ -99,7 +113,9 @@ function note_tool_results(
       ok: result.ok,
       result: _preview(result),
     });
+    step.calls.push({ name: call.name, input: call.input, ok: result.ok });
   }
+  trace.steps.push(step);
 }
 
 /*
@@ -113,4 +129,17 @@ function _preview(result: ToolResult): string {
   if (!result.ok) return result.error;
   if (result.value.length <= RESULT_PREVIEW_CHARS) return result.value;
   return result.value.slice(0, RESULT_PREVIEW_CHARS) + "...";
+}
+
+/*
+ * Idea: The text blocks of a turn, separated as a reply's blocks are.
+ *
+ * (ModelMessage) => string
+ * Pure
+ * Private
+ */
+function _text(msg: ModelMessage): string {
+  return msg.content
+    .flatMap((block) => "text" === block.type ? [block.text] : [])
+    .join("\n\n");
 }

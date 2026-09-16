@@ -31,6 +31,8 @@ import { as_tool_input } from "#core/tool_input.js";
 // A scripted turn that asks for tools. Several calls in one entry model a
 // provider requesting them together in a single turn.
 interface MockToolRequest {
+  // Lead-in text the turn writes before its calls.
+  text?: string;
   calls: { name: string; input?: ToolInput }[];
 }
 
@@ -88,18 +90,23 @@ class MockModel implements Model {
   /*
    * (Memory[], ModelOpts) => ModelMessage
    * Record the call and return a canned assistant message. No network I/O.
-   * Side Effect: records the call
+   * Like the provider, the turn's text goes to opts.on_text and an aborted
+   * opts.signal rejects.
+   * Side Effect: records the call; calls opts.on_text
    * Public
    */
   public async gen_message(memories: Memory[], opts: ModelOpts): Promise<ModelMessage> {
     // Copy: the caller keeps mutating its memory list across a tool loop, and a
     // recorded call must stay a snapshot of what this turn actually saw.
     this._calls.push({ memories: [...memories], opts });
+    opts.signal?.throwIfAborted();
     const scripted = this._scripted.length > 0
       ? this._scripted.shift() as MockReply
       : this._reply;
+    const text = "string" === typeof scripted ? scripted : scripted.text;
+    if (text) opts.on_text?.(text);
     if ("string" === typeof scripted) return _mock_message(scripted);
-    return _mock_tool_message(scripted.calls.map((call) => ({
+    return _mock_tool_message(scripted.text, scripted.calls.map((call) => ({
       id: `toolu_mock_${this._next_tool_id++}`,
       name: call.name,
       input: call.input ?? {},
@@ -183,22 +190,25 @@ function _mock_message(text: string): Anthropic.Message {
 }
 
 /*
- * ({id, name, input}[]) => Anthropic.Message
+ * (string | undefined, {id, name, input}[]) => Anthropic.Message
  * Build an assistant Message that stops to request tools, mirroring what the
- * provider sends so the loop under test is the real one.
+ * provider sends (optional lead-in text, then the calls) so the loop under
+ * test is the real one.
  * Pure
  * Private
  */
 function _mock_tool_message(
+    text: string | undefined,
     calls: { id: string; name: string; input: ToolInput }[]): Anthropic.Message {
+  const lead_in: Anthropic.ContentBlock[] = text ? [{ type: "text", text, citations: null }] : [];
   return _envelope(
-    calls.map((call): Anthropic.ToolUseBlock => ({
+    [...lead_in, ...calls.map((call): Anthropic.ToolUseBlock => ({
       type: "tool_use",
       id: call.id,
       name: call.name,
       input: call.input,
       caller: { type: "direct" },
-    })),
+    }))],
     "tool_use");
 }
 

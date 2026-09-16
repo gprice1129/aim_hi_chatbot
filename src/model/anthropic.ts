@@ -77,6 +77,10 @@ interface AnthropicModelOpts {
   system_prompt?: string;
   max_tokens?: AnthropicModelOutputLimit;
   tools?: Tool[];
+  // Receives reply text as the model writes it.
+  on_text?: (delta: string) => void;
+  // Aborts the provider request, e.g. when the client that asked has gone.
+  signal?: AbortSignal;
 }
 
 // The API rejects thinking budgets below this floor.
@@ -182,7 +186,9 @@ class AnthropicModel implements Model {
     // constructor never saw.
     validate_config(this._type, effort, thinking, max_tokens);
     const tools = opts.tools ?? [];
-    return await this._client.messages.create({
+    // Always streamed: finalMessage() resolves to the Message create() would
+    // return, and the SDK refuses non-streaming requests it expects to run long.
+    const stream = this._client.messages.stream({
       model: this._type,
       max_tokens: max_tokens,
       system: opts.system_prompt,
@@ -195,7 +201,9 @@ class AnthropicModel implements Model {
         ? { cache_control: { type: "ephemeral", ttl: caching } }
         : {}),
       messages: memories,
-    });
+    }, { signal: opts.signal });
+    if (opts.on_text) stream.on("text", opts.on_text);
+    return await stream.finalMessage();
   }
 
   public extract_content(msg: Anthropic.Message): string[] | false {
