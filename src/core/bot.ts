@@ -1,14 +1,27 @@
 export {
   ChatbotOpts,
   ChatbotMode,
+  ReplyStream,
+  ReplyOpts,
+  ToolRound,
   Chatbot,
 }
 
-import { Model, ModelOpts, ModelMessage } from "#core/model.js";
+import {
+  Model,
+  ModelOpts,
+  ModelMessage,
+  type ModelStream
+} from "#core/model.js";
 import { Memory } from "#core/memory.js";
 import { BotFailure, type BotReply } from "#core/result.js";
-import { ToolRegistry } from "#core/tool.js";
-import { empty_trace, note_model_call, note_tool_results, type BotTrace } from "#core/trace.js";
+import { ToolRegistry, type ToolCall, type ToolInput } from "#core/tool.js";
+import {
+  empty_trace,
+  note_model_call,
+  note_tool_results,
+  type BotTrace
+} from "#core/trace.js";
 
 // How many rounds of tool execution one reply may take before the bot gives up.
 const DEFAULT_MAX_TOOL_ROUNDS = 8;
@@ -20,6 +33,7 @@ interface ChatbotMode {
   prompt: string | null;
   context: string;
 };
+
 interface ChatbotOpts {
   model: Model;
   modes?: Record<string, ChatbotMode>;
@@ -27,6 +41,28 @@ interface ChatbotOpts {
   // Tools this bot may call. Omit for a bot that only converses.
   tools?: ToolRegistry;
   max_tool_rounds?: number;
+}
+
+// The model's stream plus the one event only the reply loop can raise: a
+// turn stopped to use tools and they are about to run. It fires once per
+// round, after the turn is complete, so the text delivered since the previous
+// event (or since the start) was that round's preface, not the answer.
+type ReplyStream = ModelStream & {
+  on_tool_calls?: (calls: ToolCall[]) => void;
+};
+interface ReplyOpts extends ModelOpts {
+  stream?: ReplyStream;
+}
+
+/*
+ * Idea: One round of a reply that stopped to use tools.
+ *
+ * This is what a caller may know about a reply's tool use, offered as plain
+ * data with no tool output in it. The text is in blocks, as a reply is.
+ */
+interface ToolRound {
+  text: string[];
+  calls: { name: string; input: ToolInput; ok: boolean }[];
 }
 
 class Chatbot {
@@ -37,6 +73,7 @@ class Chatbot {
   private _tools: ToolRegistry | null;
   private _max_tool_rounds: number;
   private _last_trace: BotTrace;
+  private _last_tool_rounds: ToolRound[];
 
   constructor(opts: ChatbotOpts) {
     this._model = opts.model;
@@ -46,6 +83,7 @@ class Chatbot {
     this._tools = opts.tools ?? null;
     this._max_tool_rounds = opts.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS;
     this._last_trace = empty_trace();
+    this._last_tool_rounds = [];
   }
 
   /*
@@ -78,7 +116,7 @@ class Chatbot {
    */
   public set_mode(key: string): string | boolean {
     if (null === this._modes) return false;
-    const selected_mode = this._modes[key]; 
+    const selected_mode = this._modes[key];
     if (undefined === selected_mode) return false;
     this._current_mode = key;
     return this._current_mode;
@@ -115,9 +153,9 @@ class Chatbot {
   }
 
   /*
-   * (void) => ModelMessage
+   * (ModelOpts) => ModelMessage
    * Generate a message from the model based on memory state
-   * Pure
+   * Side Effect: Network calls to the model.
    * Public
    */
   public async gen_message(opts: ModelOpts): Promise<ModelMessage> {
@@ -140,36 +178,56 @@ class Chatbot {
   /*
    * (void) => BotTrace
    * What happened during the most recent gen_reply. Empty before the first.
+   * A copy, so the caller cannot alter the record.
    * Pure
    * Public
    */
   public trace(): BotTrace {
-    return this._last_trace;
+    return structuredClone(this._last_trace);
   }
 
   /*
-   * (ModelOpts) => BotReply
+   * (void) => ToolRound[]
+   * The tool rounds of the most recent gen_reply, in order. Empty before the
+   * first, and empty for a reply that used no tools. A copy, so the caller
+   * cannot alter the record.
+   * Pure
+   * Public
+   */
+  public tool_rounds(): ToolRound[] {
+    return structuredClone(this._last_tool_rounds);
+  }
+
+  /*
+   * (ReplyOpts) => BotReply
    * Generate a message and return a usable reply or a classified failure.
    *
    * When the bot has tools, this is the agentic loop for tool usage.
    * It returns only on a turn that stopped to reply or on the round cap.
+   * A stream is honoured as ReplyStream describes.
    * Side Effect: network calls to the model; runs tools; mutates memory state
    * Public
    */
-  public async gen_reply(opts: ModelOpts): Promise<BotReply> {
+  public async gen_reply(opts: ReplyOpts): Promise<BotReply> {
+    const reply_stream = opts.stream;
+    const abort_signal = reply_stream?.abort_signal;
     const registry = this._tools;
     const offered = null === registry ? [] : registry.tools();
     const call_opts = offered.length > 0 ? { ...opts, tools: offered } : opts;
     // Assigned before the loop so an early return still leaves what happened.
     const trace = empty_trace();
     this._last_trace = trace;
+    const tool_rounds: ToolRound[] = [];
+    this._last_tool_rounds = tool_rounds;
 
     for (let round = 0; ; round++) {
       let msg: ModelMessage;
       try {
         msg = await this.gen_message(call_opts);
       } catch (err) {
-        return { ok: false, error: { failure: BotFailure.UNAVAILABLE, cause: err } };
+        // An abort surfaces as a failed provider call, but it was the host's choice.
+        const failure = abort_signal?.aborted ? BotFailure.CANCELLED : BotFailure.UNAVAILABLE;
+        return { ok: false, error: { failure, cause: err } };
       }
       note_model_call(trace, msg);
 
@@ -189,10 +247,41 @@ class Chatbot {
         return { ok: false, error: { failure: BotFailure.TOOL_LIMIT } };
       }
 
-      this.add_memory(this._model.msg_to_memory(msg));
-      const results = await registry.run_all(calls);
+      reply_stream?.on_tool_calls?.(calls);
+      let results;
+      try {
+        results = await registry.run_all(calls, abort_signal);
+      } catch (err) {
+        // Same as a cancelled provider call: the host asked to stop.
+        if (abort_signal?.aborted) {
+          return { ok: false, error: { failure: BotFailure.CANCELLED, cause: err } };
+        }
+        throw err;
+      }
       note_tool_results(trace, round, calls, results);
+      tool_rounds.push({
+        text: _preface(msg),
+        calls: calls.map((call, i) => ({
+          name: call.name,
+          input: call.input,
+          ok: results[i].ok
+        })),
+      });
+      // The request and its results enter memory together, once the tools
+      // have run: the API rejects a transcript holding a tool request with no
+      // answer, so a round that ends early must leave memory as it found it.
+      this.add_memory(this._model.msg_to_memory(msg));
       this.add_memory(this._model.tool_results_to_memory(results));
     }
   }
+}
+
+/*
+ * (ModelMessage) => string[]
+ * The text blocks a turn wrote before asking for tools.
+ * Pure
+ * Private
+ */
+function _preface(msg: ModelMessage): string[] {
+  return msg.content.flatMap((block) => "text" === block.type ? [block.text] : []);
 }

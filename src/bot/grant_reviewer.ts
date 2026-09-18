@@ -5,7 +5,7 @@ export {
   GRANT_REVIEW_MODES,
 }
 
-import { Chatbot, type ChatbotMode } from "#core/bot.js";
+import { Chatbot, type ChatbotMode, type ReplyStream } from "#core/bot.js";
 import { ContextAssembler } from "#core/context.js";
 import type { Model } from "#core/model.js";
 import type { BotReply } from "#core/result.js";
@@ -53,7 +53,7 @@ class GrantReviewer {
     return true;
   }
 
-  async review(): Promise<BotReply> {
+  async review(stream?: ReplyStream): Promise<BotReply> {
     const prompt = this.mode_prompt();
     if (null === this._context) {
       throw new Error("GrantReviewer.review called before set_context");
@@ -61,7 +61,7 @@ class GrantReviewer {
     if (null !== prompt) {
       this._bot.add_str_to_memory(prompt);
     }
-    return this._bot.gen_reply({ system_prompt: this._context });
+    return this._bot.gen_reply({ stream, system_prompt: this._context });
   }
 }
 

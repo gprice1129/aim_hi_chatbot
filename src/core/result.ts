@@ -15,6 +15,7 @@ enum BotFailure {
   UNAVAILABLE = "unavailable", // provider call threw: network / 429 / 5xx / timeout
   INCOMPLETE  = "incomplete",  // model produced no usable completion
   TOOL_LIMIT  = "tool_limit",  // model kept calling tools past the round cap
+  CANCELLED   = "cancelled",   // the host aborted the reply, e.g. its client disconnected
 }
 
 // Why a bot turn failed.
