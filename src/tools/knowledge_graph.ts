@@ -23,6 +23,7 @@ import {
 import {
   type GraphNode,
   type KnowledgeGraphSource,
+  type SubjectOutline,
   NODE_TYPES,
   NODE_LEVELS,
   NODE_AUDIENCES,
@@ -59,16 +60,19 @@ const KG_SEARCH = "kg_search";
 const KG_GET = "kg_get";
 
 /*
- * Idea: Construct the suite of knowledge graph tool serach based on a single
+ * Idea: Construct the suite of knowledge graph tools over a single
  * representation.
  *
  * (KnowledgeGraphSource) => Tool[]
- * Pure
+ * The search tool tells the model what the graph covers, so the source's
+ * outline is read once here and written into that tool's description.
+ * Side Effect: queries the source, which may perform I/O
  * Public
  */
-function make_knowledge_graph_tools(source: KnowledgeGraphSource): Tool[] {
+async function make_knowledge_graph_tools(source: KnowledgeGraphSource): Promise<Tool[]> {
+  const outline = await source.outline();
   return [
-    new KnowledgeGraphSearchTool(source),
+    new KnowledgeGraphSearchTool(source, outline),
     new KnowledgeGraphGetTool(source),
   ];
 }
@@ -76,21 +80,122 @@ function make_knowledge_graph_tools(source: KnowledgeGraphSource): Tool[] {
 /*
  * Idea: The model's entry into the graph. Match a query, answer with
  * summaries only.
+ *
+ * The description and the subject filter are built from the graph's outline
+ * at construction: a model decides whether to call this tool from the
+ * description alone, so the description has to name what the graph covers.
  */
 class KnowledgeGraphSearchTool implements Tool {
   public readonly name = KG_SEARCH;
-  public readonly description =
-    "Search the AI-literacy knowledge graph and return the best-matching nodes "
-    + "as id, title, type, level and summary -- never full text. Each summary "
-    + "is written as a compressed answer, so read the summaries and then call "
-    + KG_GET + " on the ids worth opening. Search by what the user is actually "
-    + "asking about, in their own words; the index matches alternate and "
-    + "vendor names as well as titles. Use the filters to narrow by node type "
-    + "(a risk, a policy, a worked case), by level, or by audience. Call this "
-    + "before answering any question about AI tools, practices, risks or "
-    + "institutional policy -- the graph is authoritative and overrides "
-    + "general knowledge, especially for policy nodes.";
-  public readonly schema: ToolSchema = {
+  public readonly description: string;
+  public readonly schema: ToolSchema;
+
+  private _source: KnowledgeGraphSource;
+
+  constructor(source: KnowledgeGraphSource, outline: SubjectOutline[]) {
+    this._source = source;
+    this.description =
+      "Search the knowledge graph and return the best-matching nodes "
+      + "as id, title, type, level and summary -- never full text. Each summary "
+      + "is written as a compressed answer, so read the summaries and then call "
+      + KG_GET + " on the ids worth opening. Search by what the user is actually "
+      + "asking about, in their own words; the index matches alternate and "
+      + "vendor names as well as titles. Use the filters to narrow by subject, "
+      + "by node type (a risk, a policy, a worked case), by level, or by "
+      + "audience. Call this before answering any question on a subject the "
+      + "graph covers -- the graph is authoritative and overrides general "
+      + "knowledge, especially for policy nodes. "
+      + _coverage_sentence(outline);
+    this.schema = _search_schema(outline);
+  }
+
+
+  /*
+   * Idea: Answer a query with candidates cheap enough to triage.
+   *
+   * (ToolInput) => ToolOutcome
+   * Side Effect: queries the source, which may perform I/O
+   * Public
+   */
+  public async run(input: ToolInput): Promise<ToolOutcome> {
+    const query = require_string(input, "query");
+    if (!query.ok) return query;
+    const limit = Math.min(
+      _MAX_LIMIT,
+      Math.max(1, as_integer(input["limit"]) ?? _DEFAULT_LIMIT)
+    );
+    const hits = await this._source.search(query.value, {
+      limit,
+      types:     as_string_list(input["type"]) ?? undefined,
+      levels:    as_string_list(input["level"]) ?? undefined,
+      audiences: as_string_list(input["audience"]) ?? undefined,
+      subjects:  as_string_list(input["subject"]) ?? undefined,
+    });
+
+    if (0 === hits.length) {
+      return {
+        ok: true,
+        value: JSON.stringify({
+          query: query.value,
+          returned: 0,
+          hits: [],
+          note:
+            "No nodes matched. Try broader or fewer terms, drop any filters, "
+            + "or search for the general topic rather than the specific phrasing.",
+        }),
+      };
+    }
+    return {
+      ok: true,
+      value: JSON.stringify({
+        query: query.value,
+        returned: hits.length,
+        // The source ranks best-first and the order carries that ranking, so
+        // no score is sent: its scale is the provider's, not the model's.
+        hits: hits.map((node) => ({
+          id:      node.id,
+          title:   node.title,
+          type:    node.type,
+          level:   node.level,
+          summary: node.summary,
+        })),
+      }),
+    };
+  }
+}
+
+/*
+ * Idea: What the graph covers, said to the model in one sentence.
+ *
+ * (SubjectOutline[]) => string
+ * One clause per subject that names its modules by title. A corpus with no
+ * subject level names its modules alone.
+ * Pure
+ * Private
+ */
+function _coverage_sentence(outline: SubjectOutline[]): string {
+  const clauses = outline
+    .filter((row) => row.modules.length > 0)
+    .map((row) => {
+      const titles = row.modules.map((m) => m.title).join("; ");
+      if ("" === row.subject) return titles;
+      return `${row.subject} (${titles})`;
+    });
+  if (0 === clauses.length) return "The graph is empty.";
+  return `The graph covers: ${clauses.join(". ")}.`;
+}
+
+/*
+ * Idea: The search tool's parameters, with a subject filter only when the
+ * graph has subjects to choose between.
+ *
+ * (SubjectOutline[]) => ToolSchema
+ * Pure
+ * Private
+ */
+function _search_schema(outline: SubjectOutline[]): ToolSchema {
+  const subjects = outline.map((row) => row.subject).filter((s) => "" !== s);
+  const schema: ToolSchema = {
     properties: {
       query: {
         type: ToolParamType.String,
@@ -141,64 +246,20 @@ class KnowledgeGraphSearchTool implements Tool {
     },
     required: ["query"],
   };
-
-  private _source: KnowledgeGraphSource;
-
-  constructor(source: KnowledgeGraphSource) {
-    this._source = source;
-  }
-
-  /*
-   * Idea: Answer a query with candidates cheap enough to triage.
-   *
-   * (ToolInput) => ToolOutcome
-   * Side Effect: queries the source, which may perform I/O
-   * Public
-   */
-  public async run(input: ToolInput): Promise<ToolOutcome> {
-    const query = require_string(input, "query");
-    if (!query.ok) return query;
-    const limit = Math.min(
-      _MAX_LIMIT,
-      Math.max(1, as_integer(input["limit"]) ?? _DEFAULT_LIMIT)
-    );
-    const hits = await this._source.search(query.value, {
-      limit,
-      types:     as_string_list(input["type"]) ?? undefined,
-      levels:    as_string_list(input["level"]) ?? undefined,
-      audiences: as_string_list(input["audience"]) ?? undefined,
-    });
-
-    if (0 === hits.length) {
-      return {
-        ok: true,
-        value: JSON.stringify({
-          query: query.value,
-          returned: 0,
-          hits: [],
-          note:
-            "No nodes matched. Try broader or fewer terms, drop any filters, "
-            + "or search for the general topic rather than the specific phrasing.",
-        }),
-      };
-    }
-    return {
-      ok: true,
-      value: JSON.stringify({
-        query: query.value,
-        returned: hits.length,
-        // The source ranks best-first and the order carries that ranking, so
-        // no score is sent: its scale is the provider's, not the model's.
-        hits: hits.map((node) => ({
-          id:      node.id,
-          title:   node.title,
-          type:    node.type,
-          level:   node.level,
-          summary: node.summary,
-        })),
-      }),
-    };
-  }
+  if (0 === subjects.length) return schema;
+  schema.properties["subject"] = {
+    type: ToolParamType.Array,
+    description:
+      "Restrict to these subjects. Omit to search every subject; a question "
+      + "that spans them, such as an AI tool holding institutional data, "
+      + "usually should be searched without this filter.",
+    items: {
+      type: ToolParamType.String,
+      description: "A subject.",
+      choices: subjects,
+    },
+  };
+  return schema;
 }
 
 /*
