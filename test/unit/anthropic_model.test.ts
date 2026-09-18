@@ -1,13 +1,8 @@
 import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 
-import {
-  AnthropicModel,
-  AnthropicModelType,
-  AnthropicModelEffortScale,
-  AnthropicModelThinkingMode,
-  AnthropicModelCacheTtl,
-} from "#model/anthropic.js";
+import { AnthropicModel, AnthropicModelType } from "#model/anthropic.js";
+import { ModelEffortScale, ModelThinkingMode, ModelCacheTtl } from "#core/model.js";
 import type { Endpoint } from "#core/types.js";
 
 // validate_config is private to the module; these tests exercise it through
@@ -26,35 +21,35 @@ describe("AnthropicModel config validation at construction", () => {
   it("accepts adaptive thinking, effort, and caching on Opus", () => {
     new AnthropicModel(
       ENDPOINT, AnthropicModelType.Opus,
-      AnthropicModelEffortScale.Max, 16384,
-      { type: AnthropicModelThinkingMode.Adaptive },
-      AnthropicModelCacheTtl.OneHour);
+      ModelEffortScale.Max, 16384,
+      { type: ModelThinkingMode.Adaptive },
+      ModelCacheTtl.OneHour);
   });
 
   it("accepts a budgeted thinking config on Haiku", () => {
     new AnthropicModel(
       ENDPOINT, AnthropicModelType.Haiku, null, 2048,
-      { type: AnthropicModelThinkingMode.Enabled, budget_tokens: 1024 });
+      { type: ModelThinkingMode.Enabled, budget_tokens: 1024 });
   });
 
   it("accepts a budgeted thinking config on Sonnet (deprecated escape hatch)", () => {
     new AnthropicModel(
       ENDPOINT, AnthropicModelType.Sonnet, null, 4096,
-      { type: AnthropicModelThinkingMode.Enabled, budget_tokens: 2048 });
+      { type: ModelThinkingMode.Enabled, budget_tokens: 2048 });
   });
 
   it("accepts explicitly disabled thinking on every model", () => {
     for (const type of Object.values(AnthropicModelType)) {
       new AnthropicModel(
         ENDPOINT, type, null, 1024,
-        { type: AnthropicModelThinkingMode.Disabled });
+        { type: ModelThinkingMode.Disabled });
     }
   });
 
   it("rejects effort on Haiku", () => {
     assert.throws(
       () => new AnthropicModel(
-        ENDPOINT, AnthropicModelType.Haiku, AnthropicModelEffortScale.Low, 1024),
+        ENDPOINT, AnthropicModelType.Haiku, ModelEffortScale.Low, 1024),
       /rejects the effort parameter/);
   });
 
@@ -62,7 +57,7 @@ describe("AnthropicModel config validation at construction", () => {
     assert.throws(
       () => new AnthropicModel(
         ENDPOINT, AnthropicModelType.Haiku, null, 2048,
-        { type: AnthropicModelThinkingMode.Adaptive }),
+        { type: ModelThinkingMode.Adaptive }),
       /does not support adaptive thinking/);
   });
 
@@ -70,7 +65,7 @@ describe("AnthropicModel config validation at construction", () => {
     assert.throws(
       () => new AnthropicModel(
         ENDPOINT, AnthropicModelType.Opus, null, 16384,
-        { type: AnthropicModelThinkingMode.Enabled, budget_tokens: 8192 }),
+        { type: ModelThinkingMode.Enabled, budget_tokens: 8192 }),
       /rejects budget_tokens thinking/);
   });
 
@@ -78,7 +73,7 @@ describe("AnthropicModel config validation at construction", () => {
     assert.throws(
       () => new AnthropicModel(
         ENDPOINT, AnthropicModelType.Sonnet, null, 2048,
-        { type: AnthropicModelThinkingMode.Enabled, budget_tokens: 512 }),
+        { type: ModelThinkingMode.Enabled, budget_tokens: 512 }),
       /budget_tokens must be >= 1024/);
   });
 
@@ -86,7 +81,7 @@ describe("AnthropicModel config validation at construction", () => {
     assert.throws(
       () => new AnthropicModel(
         ENDPOINT, AnthropicModelType.Haiku, null, 1024,
-        { type: AnthropicModelThinkingMode.Enabled, budget_tokens: 1024 }),
+        { type: ModelThinkingMode.Enabled, budget_tokens: 1024 }),
       /must be < max_tokens/);
   });
 
@@ -105,7 +100,7 @@ describe("AnthropicModel config validation of per-call opts", () => {
     // Valid at construction; the per-call effort makes the merge invalid.
     const model = new AnthropicModel(ENDPOINT, AnthropicModelType.Haiku, null, 2048);
     await assert.rejects(
-      model.gen_message([], { effort: AnthropicModelEffortScale.Low }),
+      model.gen_message([], { effort: ModelEffortScale.Low }),
       /rejects the effort parameter/);
   });
 
@@ -114,7 +109,7 @@ describe("AnthropicModel config validation of per-call opts", () => {
     // per-call max_tokens shrinks the cap below the standing budget.
     const model = new AnthropicModel(
       ENDPOINT, AnthropicModelType.Haiku, null, 2048,
-      { type: AnthropicModelThinkingMode.Enabled, budget_tokens: 1024 });
+      { type: ModelThinkingMode.Enabled, budget_tokens: 1024 });
     await assert.rejects(
       model.gen_message([], { max_tokens: 1024 }),
       /must be < max_tokens/);
@@ -123,7 +118,16 @@ describe("AnthropicModel config validation of per-call opts", () => {
   it("rejects a per-call thinking config the model does not support", async () => {
     const model = new AnthropicModel(ENDPOINT, AnthropicModelType.Haiku, null, 2048);
     await assert.rejects(
-      model.gen_message([], { thinking: { type: AnthropicModelThinkingMode.Adaptive } }),
+      model.gen_message([], { thinking: { type: ModelThinkingMode.Adaptive } }),
       /does not support adaptive thinking/);
+  });
+
+  it("rejects a whole reply that asks for more output than the SDK will send unstreamed", async () => {
+    // Valid at construction: the cap only applies once the turn is known not
+    // to stream, which no constructor argument decides.
+    const model = new AnthropicModel(ENDPOINT, AnthropicModelType.Opus, null, 32768);
+    await assert.rejects(
+      model.gen_message([], {}),
+      /a reply generated whole may not exceed 21333 max_tokens/);
   });
 });

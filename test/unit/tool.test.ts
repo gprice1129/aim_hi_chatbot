@@ -102,4 +102,17 @@ describe("ToolRegistry", () => {
     open();
     await assert.rejects(pending, { name: "AbortError" });
   });
+
+  it("refuses to start a batch on a signal already aborted", async () => {
+    let ran = 0;
+    const registry = new ToolRegistry([
+      stub("counter", async () => { ran++; return { ok: true, value: "ran" }; }),
+    ]);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      registry.run_all([{ id: "1", name: "counter", input: {} }], controller.signal),
+      { name: "AbortError" });
+    assert.equal(ran, 0);
+  });
 });

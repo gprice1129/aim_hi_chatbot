@@ -7,6 +7,7 @@ import { ToolRegistry, ToolParamType } from "#core/tool.js";
 import { BotFailure } from "#core/result.js";
 import type { Tool, ToolInput, ToolOutcome } from "#core/tool.js";
 import type { Memory } from "#core/memory.js";
+import type { Model } from "#core/model.js";
 
 // A tool that records what it was called with so the loop can be assert what
 // the model asked for and what the bot ran.
@@ -253,10 +254,11 @@ describe("Chatbot tool loop", () => {
     const bot = new Chatbot({ model, tools: new ToolRegistry([tool]) });
     const events: string[] = [];
 
-    await bot.gen_reply({
-      on_text: (text) => events.push(`text:${text}`),
+    await bot.gen_reply({ stream: {
+      on_delta: (text) => events.push(`text:${text}`),
       on_tool_calls: (calls) => events.push(`tools:${calls.map((c) => c.name)} ran:${tool.seen.length}`),
-    });
+      abort_signal: new AbortController().signal,
+    } });
 
     // Announced before the tools run, so a host can show progress while they do.
     assert.deepEqual(events, ["text:Let me look.", "tools:kg_search ran:0", "text:Found it."]);
@@ -270,7 +272,7 @@ describe("Chatbot tool loop", () => {
     controller.abort();
     const bot = new Chatbot({ model: new MockModel() });
 
-    const reply = await bot.gen_reply({ signal: controller.signal });
+    const reply = await bot.gen_reply({ stream: { on_delta: () => {}, abort_signal: controller.signal } });
 
     assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
   });
@@ -295,12 +297,85 @@ describe("Chatbot tool loop", () => {
     });
     const bot = new Chatbot({ model, tools: new ToolRegistry([tool]) });
 
-    const pending = bot.gen_reply({ signal: controller.signal });
+    const pending = bot.gen_reply({ stream: { on_delta: () => {}, abort_signal: controller.signal } });
     await seen_start;
     controller.abort();
 
     const reply = await pending;
     assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
     assert.deepEqual(bot.trace().steps, []);
+
+    // The cancelled round left no half-finished tool exchange behind: the next
+    // reply sends the model the transcript as it was before the round.
+    const next = await bot.gen_reply({});
+    assert.equal(next.ok, true);
+    assert.deepEqual(model.calls()[1].memories, []);
+  });
+
+  it("classifies an abort that lands mid-turn as cancelled, after the text so far", async () => {
+    const controller = new AbortController();
+    const model = new MockModel({ replies: [{ deltas: ["Part one, ", "part two."] }] });
+    const bot = new Chatbot({ model });
+    const seen: string[] = [];
+
+    const reply = await bot.gen_reply({ stream: {
+      on_delta: (text) => { seen.push(text); controller.abort(); },
+      abort_signal: controller.signal,
+    } });
+
+    assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
+    assert.deepEqual(seen, ["Part one, "]);
+  });
+
+  it("cancels in a later round and keeps the rounds that completed", async () => {
+    const controller = new AbortController();
+    const model = new MockModel({
+      replies: [
+        { text: "Looking.", calls: [{ name: "kg_search", input: { q: "phi" } }] },
+        // The abort lands while the second turn streams, after the first
+        // round's tools have run and their results are in.
+        { deltas: ["Found ", "it."] },
+      ],
+    });
+    const bot = new Chatbot({ model, tools: new ToolRegistry([recorder("kg_search")]) });
+
+    const reply = await bot.gen_reply({ stream: {
+      on_delta: (text) => { if ("Found " === text) controller.abort(); },
+      abort_signal: controller.signal,
+    } });
+
+    assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
+    // The completed round is in the trace and in the transcript the second
+    // model call was given.
+    assert.equal(bot.trace().steps.length, 1);
+    const second_call = model.calls()[1];
+    assert.equal(second_call.memories.length, 2);
+    assert.deepEqual(blocks(second_call.memories[1]).map((b) => b.type), ["tool_result"]);
+  });
+
+  it("reports a provider failure as cancelled once the host has aborted", async () => {
+    // The loop classifies by the signal, not by the error: once the host has
+    // gone, nobody is waiting to hear that the provider also failed.
+    const controller = new AbortController();
+    const inner = new MockModel();
+    const failing: Model = {
+      ...inner,
+      str_to_memory: (s) => inner.str_to_memory(s),
+      extract_content: (m) => inner.extract_content(m),
+      wants_tools: (m) => inner.wants_tools(m),
+      extract_tool_calls: (m) => inner.extract_tool_calls(m),
+      msg_to_memory: (m) => inner.msg_to_memory(m),
+      tool_results_to_memory: (r) => inner.tool_results_to_memory(r),
+      async gen_message() {
+        controller.abort();
+        throw new Error("upstream 503");
+      },
+    };
+    const bot = new Chatbot({ model: failing });
+
+    const reply = await bot.gen_reply({ stream: { on_delta: () => {}, abort_signal: controller.signal } });
+
+    assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
+    assert.match(String(reply.ok ? "" : reply.error.cause), /upstream 503/);
   });
 });

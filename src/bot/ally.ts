@@ -36,7 +36,7 @@ class Ally {
     history: HistorySource,
     project: ProjectContextSource,
     message: string,
-    stream: ReplyStream = {},
+    stream?: ReplyStream,
   ): Promise<BotReply> {
     const { system, messages } = await this._assembler.assemble({
       system_prompt: this._system_prompt,
@@ -47,7 +47,7 @@ class Ally {
     for (const turn of messages) {
       this._bot.add_memory(turn);
     }
-    return this._bot.gen_reply({ ...stream, system_prompt: system });
+    return this._bot.gen_reply({ stream, system_prompt: system });
   }
 
   // What happened during the most recent respond: rounds, tool calls, tokens.

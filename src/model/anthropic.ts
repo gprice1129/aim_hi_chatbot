@@ -1,19 +1,22 @@
 export {
-  AnthropicModelEffortScale,
-  AnthropicModelEffort,
-  AnthropicModelThinkingMode,
-  AnthropicModelThinking,
-  AnthropicModelCacheTtl,
-  AnthropicModelCaching,
-  AnthropicModelOutputLimit,
   AnthropicModelType,
-  AnthropicModelOpts,
   AnthropicModel,
 }
 
 import { Anthropic } from "@anthropic-ai/sdk";
 import { Endpoint } from "#core/types.js";
-import { Model } from "#core/model.js";
+import {
+  Model,
+  ModelEffort,
+  ModelEffortScale,
+  ModelThinking,
+  ModelThinkingMode,
+  ModelCaching,
+  ModelCacheTtl,
+  ModelOutputLimit,
+  ModelOpts,
+  ModelStream,
+} from "#core/model.js";
 import { Memory } from "#core/memory.js";
 import {
   ToolParamType,
@@ -30,33 +33,6 @@ enum AnthropicStopReason {
   STOP_SEQ = 'stop_sequence',
   TOOL = 'tool_use',
 }
-enum AnthropicModelEffortScale {
-  Low = "low",
-  Medium = "medium",
-  High = "high",
-  Max = "max"
-}
-type AnthropicModelEffort = AnthropicModelEffortScale | null;
-enum AnthropicModelThinkingMode {
-  Adaptive = "adaptive",
-  Enabled = "enabled",
-  Disabled = "disabled",
-}
-// null omits the thinking parameter entirely. Which configs a model accepts
-// varies by model; see validate_config.
-type AnthropicModelThinking =
-  | { type: AnthropicModelThinkingMode.Adaptive }
-  | { type: AnthropicModelThinkingMode.Enabled, budget_tokens: number }
-  | { type: AnthropicModelThinkingMode.Disabled }
-  | null;
-enum AnthropicModelCacheTtl {
-  FiveMinutes = "5m",
-  OneHour = "1h",
-}
-// Prompt-cache TTL for the request prefix; null disables caching.
-type AnthropicModelCaching = AnthropicModelCacheTtl | null;
-// Hard cap on output tokens (thinking + text) per response.
-type AnthropicModelOutputLimit = number;
 enum AnthropicModelType {
   Haiku = "claude-haiku-4-5",
   Opus = "claude-opus-4-7",
@@ -70,92 +46,45 @@ enum AnthropicContentType {
   TEXT = "text",
   TOOL = "tool_use",
 }
-interface AnthropicModelOpts {
-  effort?: AnthropicModelEffort;
-  thinking?: AnthropicModelThinking;
-  caching?: AnthropicModelCaching;
-  system_prompt?: string;
-  max_tokens?: AnthropicModelOutputLimit;
-  tools?: Tool[];
-  // Receives reply text as the model writes it.
-  on_text?: (delta: string) => void;
-  // Aborts the provider request, e.g. when the client that asked has gone.
-  signal?: AbortSignal;
-}
 
 // The API rejects thinking budgets below this floor.
 const MIN_THINKING_BUDGET = 1024;
 
-/*
- * (AnthropicModelType, AnthropicModelEffort, AnthropicModelThinking,
- *  AnthropicModelOutputLimit) => void
- * Throws on parameter combinations the API is known to reject, so
- * misconfiguration surfaces as a developer error at the call site instead of
- * an opaque 400 at request time.
- * Pure
- * Private
- */
-function validate_config(
-    type: AnthropicModelType,
-    effort: AnthropicModelEffort,
-    thinking: AnthropicModelThinking,
-    max_tokens: AnthropicModelOutputLimit,
-): void {
-  if (!Number.isInteger(max_tokens) || max_tokens < 1) {
-    throw new Error(
-      `AnthropicModel config: max_tokens must be a positive integer, got ${max_tokens}`);
-  }
-  if (null !== effort && AnthropicModelType.Haiku === type) {
-    throw new Error(
-      `AnthropicModel config: ${type} rejects the effort parameter; leave effort unset`);
-  }
-  if (null === thinking) return;
-  switch (thinking.type) {
-    case AnthropicModelThinkingMode.Adaptive:
-      if (AnthropicModelType.Haiku === type) {
-        throw new Error(
-          `AnthropicModel config: ${type} does not support adaptive thinking; `
-          + `use ${AnthropicModelThinkingMode.Enabled} with a budget_tokens`);
-      }
-      break;
-    case AnthropicModelThinkingMode.Enabled:
-      if (AnthropicModelType.Opus === type) {
-        throw new Error(
-          `AnthropicModel config: ${type} rejects budget_tokens thinking; `
-          + `use ${AnthropicModelThinkingMode.Adaptive}`);
-      }
-      if (thinking.budget_tokens < MIN_THINKING_BUDGET) {
-        throw new Error(
-          `AnthropicModel config: thinking budget_tokens must be >= `
-          + `${MIN_THINKING_BUDGET}, got ${thinking.budget_tokens}`);
-      }
-      if (thinking.budget_tokens >= max_tokens) {
-        throw new Error(
-          `AnthropicModel config: thinking budget_tokens `
-          + `(${thinking.budget_tokens}) must be < max_tokens (${max_tokens})`);
-      }
-      break;
-    case AnthropicModelThinkingMode.Disabled:
-      break;
-  }
-}
+// The most output tokens a reply generated whole may ask for. The SDK refuses
+// a non-streaming request it expects to run over ten minutes, and it expects
+// 128,000 tokens an hour, so the cap is ten minutes' worth. A streamed reply
+// has no such limit.
+const MAX_WHOLE_REPLY_TOKENS = Math.floor(128_000 * 10 / 60);
+
+// The generation parameters a request carries, every one resolved: the
+// per-call option where set, the model's standing value otherwise.
+type _AnthropicOpts = Required<Pick<ModelOpts, "effort"
+                                               | "thinking"
+                                               | "caching"
+                                               | "max_tokens">>;
+
+// One turn's request
+type _AnthropicRequest =
+  | { params: Anthropic.MessageCreateParamsNonStreaming; stream?: undefined }
+  | { params: Anthropic.MessageCreateParamsStreaming; stream: ModelStream };
+
 
 class AnthropicModel implements Model {
   private _client: Anthropic;
   private _type: AnthropicModelType;
-  private _effort: AnthropicModelEffort;
-  private _thinking: AnthropicModelThinking;
-  private _caching: AnthropicModelCaching;
-  private _max_tokens: AnthropicModelOutputLimit;
+  private _effort: ModelEffort;
+  private _thinking: ModelThinking;
+  private _caching: ModelCaching;
+  private _max_tokens: ModelOutputLimit;
   constructor(
       endpoint: Endpoint,
       type: AnthropicModelType,
-      effort: AnthropicModelEffort = null,
-      max_tokens: AnthropicModelOutputLimit,
-      thinking: AnthropicModelThinking = null,
-      caching: AnthropicModelCaching = null,
+      effort: ModelEffort = null,
+      max_tokens: ModelOutputLimit,
+      thinking: ModelThinking = null,
+      caching: ModelCaching = null,
   ) {
-    validate_config(type, effort, thinking, max_tokens);
+    _validate_options(type, { effort, thinking, caching, max_tokens });
     this._client = new Anthropic({
       apiKey: endpoint.api_key,
       baseURL: endpoint.base_url,
@@ -174,36 +103,64 @@ class AnthropicModel implements Model {
     }
   }
 
-  public async gen_message(memories: Anthropic.MessageParam[], opts: AnthropicModelOpts): Promise<Anthropic.Message> {
-    // A null parameter is unset and must be omitted from the request: some
-    // models reject parameters outright (e.g. Haiku rejects effort), so
-    // "unset" cannot be expressed as a value on the wire.
-    const effort = opts.effort ?? this._effort;
-    const thinking = opts.thinking ?? this._thinking;
-    const caching = opts.caching ?? this._caching;
-    const max_tokens = opts.max_tokens ?? this._max_tokens;
-    // Re-validate here: per-call opts can produce a combination the
-    // constructor never saw.
-    validate_config(this._type, effort, thinking, max_tokens);
+  /*
+   * (Memory[], ModelOpts) => ModelMessage
+   * Generate one turn. Turn generation can be configured via ModelOpts.
+   * Side Effect: network call to the provider; calls opts.stream.on_delta
+   * Public
+   */
+  public async gen_message(memories: Anthropic.MessageParam[],
+                           opts: ModelOpts): Promise<Anthropic.Message> {
+    const { params, stream } = this._to_request(memories, opts);
+    if (undefined === stream) {
+      return await this._client.messages.create(params);
+    }
+    // The host's abort signal is an SDK request option, not an API parameter.
+    const request_opts = { signal: stream.abort_signal };
+    const request = this._client.messages.stream(params, request_opts);
+    request.on("text", stream.on_delta);
+    return await request.finalMessage();
+  }
+
+  /*
+   * (MessageParam[], ModelOpts) => _AnthropicRequest
+   * The request the anthropic API accepts for one turn.
+   * Pure
+   * Private
+   */
+  private _to_request(memories: Anthropic.MessageParam[],
+                      opts: ModelOpts): _AnthropicRequest {
+    const base_opts: _AnthropicOpts = {
+      effort:     opts.effort     ?? this._effort,
+      thinking:   opts.thinking   ?? this._thinking,
+      caching:    opts.caching    ?? this._caching,
+      max_tokens: opts.max_tokens ?? this._max_tokens,
+    };
+    _validate_options(this._type, base_opts);
+    const { effort, thinking, caching, max_tokens } = base_opts;
+    // Only a whole reply is bound by the SDK's non-streaming limit, so the
+    // check lives here, where whether the reply streams is known.
+    if (undefined === opts.stream && max_tokens > MAX_WHOLE_REPLY_TOKENS) {
+      throw new Error(
+        `AnthropicModel config: a reply generated whole may not exceed `
+        + `${MAX_WHOLE_REPLY_TOKENS} max_tokens, got ${max_tokens}; stream it or lower the cap`);
+    }
     const tools = opts.tools ?? [];
-    // Always streamed: finalMessage() resolves to the Message create() would
-    // return, and the SDK refuses non-streaming requests it expects to run long.
-    const stream = this._client.messages.stream({
+    const base = {
       model: this._type,
-      max_tokens: max_tokens,
+      max_tokens,
       system: opts.system_prompt,
       ...(tools.length > 0 ? { tools: tools.map(_to_anthropic_tool) } : {}),
-      ...(null !== effort ? { output_config: { effort } } : {}),
-      ...(null !== thinking ? { thinking } : {}),
+      ...(null !== effort ? { output_config: { effort: _to_anthropic_effort(effort) } } : {}),
+      ...(null !== thinking ? { thinking: _to_anthropic_thinking(thinking) } : {}),
       // Top-level cache_control marks the last cacheable block of the request
       // prefix (system prompt + messages) for prompt caching.
-      ...(null !== caching
-        ? { cache_control: { type: "ephemeral", ttl: caching } }
-        : {}),
+      ...(null !== caching ? { cache_control: _to_anthropic_cache_control(caching) } : {}),
       messages: memories,
-    }, { signal: opts.signal });
-    if (opts.on_text) stream.on("text", opts.on_text);
-    return await stream.finalMessage();
+    };
+    const stream = opts.stream;
+    if (undefined === stream) return { params: { ...base, stream: false } };
+    return { params: { ...base, stream: true }, stream };
   }
 
   public extract_content(msg: Anthropic.Message): string[] | false {
@@ -285,6 +242,100 @@ class AnthropicModel implements Model {
 }
 
 /*
+ * (AnthropicModelType, _AnthropicOpts) => void
+ * Throws on parameter combinations the API is known to reject so
+ * misconfiguration surfaces as a developer error at the call site instead of
+ * an opaque 400 at request time.
+ * Pure
+ * Private
+ */
+function _validate_options(type: AnthropicModelType,
+                           opts: _AnthropicOpts): void {
+  const { effort, thinking, max_tokens } = opts;
+  if (!Number.isInteger(max_tokens) || max_tokens < 1) {
+    throw new Error(
+      `AnthropicModel config: max_tokens must be a positive integer, got ${max_tokens}`);
+  }
+  if (null !== effort && AnthropicModelType.Haiku === type) {
+    throw new Error(
+      `AnthropicModel config: ${type} rejects the effort parameter; leave effort unset`);
+  }
+  if (null === thinking) return;
+  switch (thinking.type) {
+    case ModelThinkingMode.Adaptive:
+      if (AnthropicModelType.Haiku === type) {
+        throw new Error(
+          `AnthropicModel config: ${type} does not support adaptive thinking; `
+          + `use ${ModelThinkingMode.Enabled} with a budget_tokens`);
+      }
+      break;
+    case ModelThinkingMode.Enabled:
+      if (AnthropicModelType.Opus === type) {
+        throw new Error(
+          `AnthropicModel config: ${type} rejects budget_tokens thinking; `
+          + `use ${ModelThinkingMode.Adaptive}`);
+      }
+      if (thinking.budget_tokens < MIN_THINKING_BUDGET) {
+        throw new Error(
+          `AnthropicModel config: thinking budget_tokens must be >= `
+          + `${MIN_THINKING_BUDGET}, got ${thinking.budget_tokens}`);
+      }
+      if (thinking.budget_tokens >= max_tokens) {
+        throw new Error(
+          `AnthropicModel config: thinking budget_tokens `
+          + `(${thinking.budget_tokens}) must be < max_tokens (${max_tokens})`);
+      }
+      break;
+    case ModelThinkingMode.Disabled:
+      break;
+  }
+}
+
+/*
+ * (ModelEffortScale) => OutputConfig["effort"]
+ * Pure
+ * Private
+ */
+function _to_anthropic_effort(
+    effort: Exclude<ModelEffort, null>): NonNullable<Anthropic.OutputConfig["effort"]> {
+  switch (effort) {
+    case ModelEffortScale.Low: return "low";
+    case ModelEffortScale.Medium: return "medium";
+    case ModelEffortScale.High: return "high";
+    case ModelEffortScale.Max: return "max";
+  }
+}
+
+/*
+ * (ModelCacheTtl) => CacheControlEphemeral
+ * Pure
+ * Private
+ */
+function _to_anthropic_cache_control(
+    caching: Exclude<ModelCaching, null>): Anthropic.CacheControlEphemeral {
+  switch (caching) {
+    case ModelCacheTtl.FiveMinutes: return { type: "ephemeral", ttl: "5m" };
+    case ModelCacheTtl.OneHour: return { type: "ephemeral", ttl: "1h" };
+  }
+}
+
+/*
+ * (ModelThinking) => ThinkingConfigParam
+ * Pure
+ * Private
+ */
+function _to_anthropic_thinking(
+    thinking: Exclude<ModelThinking, null>): Anthropic.ThinkingConfigParam {
+  switch (thinking.type) {
+    case ModelThinkingMode.Adaptive: return { type: "adaptive" };
+    case ModelThinkingMode.Enabled: return {
+      type: "enabled",
+      budget_tokens: thinking.budget_tokens
+    };
+    case ModelThinkingMode.Disabled: return { type: "disabled" };
+  }
+}
+/*
  * (Tool) => Anthropic.Tool
  * Translate a Tool declaration into the API's tool schema.
  * Pure
@@ -293,7 +344,7 @@ class AnthropicModel implements Model {
 function _to_anthropic_tool(tool: Tool): Anthropic.Tool {
   const properties: Record<string, unknown> = {};
   for (const [name, param] of Object.entries(tool.schema.properties)) {
-    properties[name] = _to_json_schema(param);
+    properties[name] = _tool_param_to_json_schema(param);
   }
   return {
     name: tool.name,
@@ -308,18 +359,19 @@ function _to_anthropic_tool(tool: Tool): Anthropic.Tool {
 
 /*
  * (ToolParam) => Record<string, unknown>
- * Translate one parameter into its JSON Schema fragment. An Array parameter
- * with no declared element type is left unconstrained rather than guessed at.
+ * Translate one tool parameter into its JSON Schema fragment. An Array
+ * parameter with no declared element type is left unconstrained rather than
+ * guessed at.
  * Pure
  * Private
  */
-function _to_json_schema(param: ToolParam): Record<string, unknown> {
+function _tool_param_to_json_schema(param: ToolParam): Record<string, unknown> {
   return {
     type: param.type,
     description: param.description,
     ...(undefined !== param.choices ? { enum: param.choices } : {}),
     ...(ToolParamType.Array === param.type && undefined !== param.items
-      ? { items: _to_json_schema(param.items) }
+      ? { items: _tool_param_to_json_schema(param.items) }
       : {}),
   };
 }

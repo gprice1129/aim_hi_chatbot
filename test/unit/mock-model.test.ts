@@ -3,6 +3,7 @@ import * as assert from "node:assert/strict";
 
 import { MockModel } from "#model/mock.js";
 
+
 describe("MockModel", () => {
   it("returns the default canned reply and extracts its text", async () => {
     const m = new MockModel();
@@ -51,13 +52,38 @@ describe("MockModel", () => {
   it("streams each turn's text, lead-ins included, and rejects once aborted", async () => {
     const m = new MockModel({ replies: [{ text: "lead-in", calls: [{ name: "t" }] }, "answer"] });
     const seen: string[] = [];
-    const tool_turn = await m.gen_message([], { on_text: (text) => seen.push(text) });
-    await m.gen_message([], { on_text: (text) => seen.push(text) });
+    const tool_turn = await m.gen_message([], { stream: { on_delta: (text) => seen.push(text), abort_signal: new AbortController().signal } });
+    await m.gen_message([], { stream: { on_delta: (text) => seen.push(text), abort_signal: new AbortController().signal } });
     assert.deepEqual(seen, ["lead-in", "answer"]);
     assert.deepEqual(tool_turn.content[0], { type: "text", text: "lead-in", citations: null });
 
     const controller = new AbortController();
     controller.abort();
-    await assert.rejects(m.gen_message([], { signal: controller.signal }), { name: "AbortError" });
+    await assert.rejects(m.gen_message([], { stream: { on_delta: () => {}, abort_signal: controller.signal } }), { name: "AbortError" });
+  });
+});
+
+describe("MockModel streamed turns", () => {
+  it("delivers a turn scripted in pieces one piece at a time", async () => {
+    const m = new MockModel({ replies: [{ deltas: ["one ", "two"] }] });
+    const seen: string[] = [];
+    const msg = await m.gen_message([], { stream: {
+      on_delta: (text) => seen.push(text), abort_signal: new AbortController().signal,
+    } });
+    assert.deepEqual(seen, ["one ", "two"]);
+    assert.deepEqual(m.extract_content(msg), ["one two"]);
+  });
+
+  it("rejects mid-turn once aborted, delivering nothing further", async () => {
+    const m = new MockModel({ replies: [{ deltas: ["one ", "two ", "three"] }] });
+    const controller = new AbortController();
+    const seen: string[] = [];
+    await assert.rejects(
+      m.gen_message([], { stream: {
+        on_delta: (text) => { seen.push(text); controller.abort(); },
+        abort_signal: controller.signal,
+      } }),
+      { name: "AbortError" });
+    assert.deepEqual(seen, ["one "]);
   });
 });
