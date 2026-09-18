@@ -31,7 +31,7 @@ import { as_tool_input } from "#core/tool_input.js";
 // A scripted turn that asks for tools. Several calls in one entry model a
 // provider requesting them together in a single turn.
 interface MockToolRequest {
-  // Lead-in text the turn writes before its calls.
+  // Preface: text the turn writes before its calls.
   text?: string;
   calls: { name: string; input?: ToolInput }[];
 }
@@ -210,7 +210,7 @@ function _mock_message(text: string): Anthropic.Message {
 /*
  * (string | undefined, {id, name, input}[]) => Anthropic.Message
  * Build an assistant Message that stops to request tools, mirroring what the
- * provider sends (optional lead-in text, then the calls) so the loop under
+ * provider sends (an optional preface, then the calls) so the loop under
  * test is the real one.
  * Pure
  * Private
@@ -218,9 +218,9 @@ function _mock_message(text: string): Anthropic.Message {
 function _mock_tool_message(
     text: string | undefined,
     calls: { id: string; name: string; input: ToolInput }[]): Anthropic.Message {
-  const lead_in: Anthropic.ContentBlock[] = text ? [{ type: "text", text, citations: null }] : [];
+  const preface: Anthropic.ContentBlock[] = text ? [{ type: "text", text, citations: null }] : [];
   return _envelope(
-    [...lead_in, ...calls.map((call): Anthropic.ToolUseBlock => ({
+    [...preface, ...calls.map((call): Anthropic.ToolUseBlock => ({
       type: "tool_use",
       id: call.id,
       name: call.name,

@@ -211,11 +211,12 @@ describe("Chatbot tool loop", () => {
     assert.equal(failed.tool_calls[0].ok, false);
     assert.match(failed.tool_calls[0].result, /Unknown tool 'kg_serch'/);
 
-    // Each reply starts a fresh trace.
+    // Each reply starts a fresh trace and a fresh list of tool rounds.
     await bot.gen_reply({});
     assert.deepEqual(bot.trace(), {
-      rounds: 1, tool_calls: [], steps: [], usage: { input_tokens: 0, output_tokens: 0 },
+      rounds: 1, tool_calls: [], usage: { input_tokens: 0, output_tokens: 0 },
     });
+    assert.deepEqual(bot.tool_rounds(), []);
   });
 
   it("classifies a provider error during a tool loop as unavailable", async () => {
@@ -262,9 +263,14 @@ describe("Chatbot tool loop", () => {
 
     // Announced before the tools run, so a host can show progress while they do.
     assert.deepEqual(events, ["text:Let me look.", "tools:kg_search ran:0", "text:Found it."]);
-    assert.deepEqual(bot.trace().steps, [
-      { text: "Let me look.", calls: [{ name: "kg_search", input: { q: "phi" }, ok: true }] },
+    assert.deepEqual(bot.tool_rounds(), [
+      { text: ["Let me look."], calls: [{ name: "kg_search", input: { q: "phi" }, ok: true }] },
     ]);
+    // A caller gets a copy of the record, not the record.
+    bot.tool_rounds().pop();
+    bot.trace().tool_calls.pop();
+    assert.equal(bot.tool_rounds().length, 1);
+    assert.equal(bot.trace().tool_calls.length, 1);
   });
 
   it("classifies a reply its host aborted as cancelled", async () => {
@@ -303,7 +309,7 @@ describe("Chatbot tool loop", () => {
 
     const reply = await pending;
     assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
-    assert.deepEqual(bot.trace().steps, []);
+    assert.deepEqual(bot.tool_rounds(), []);
 
     // The cancelled round left no half-finished tool exchange behind: the next
     // reply sends the model the transcript as it was before the round.
@@ -347,7 +353,7 @@ describe("Chatbot tool loop", () => {
     assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
     // The completed round is in the trace and in the transcript the second
     // model call was given.
-    assert.equal(bot.trace().steps.length, 1);
+    assert.equal(bot.tool_rounds().length, 1);
     const second_call = model.calls()[1];
     assert.equal(second_call.memories.length, 2);
     assert.deepEqual(blocks(second_call.memories[1]).map((b) => b.type), ["tool_result"]);

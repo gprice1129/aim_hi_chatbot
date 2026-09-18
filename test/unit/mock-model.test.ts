@@ -49,13 +49,13 @@ describe("MockModel", () => {
     assert.equal(msg.usage.output_tokens, 0);
   });
 
-  it("streams each turn's text, lead-ins included, and rejects once aborted", async () => {
-    const m = new MockModel({ replies: [{ text: "lead-in", calls: [{ name: "t" }] }, "answer"] });
+  it("streams each turn's text, prefaces included, and rejects once aborted", async () => {
+    const m = new MockModel({ replies: [{ text: "preface", calls: [{ name: "t" }] }, "answer"] });
     const seen: string[] = [];
     const tool_turn = await m.gen_message([], { stream: { on_delta: (text) => seen.push(text), abort_signal: new AbortController().signal } });
     await m.gen_message([], { stream: { on_delta: (text) => seen.push(text), abort_signal: new AbortController().signal } });
-    assert.deepEqual(seen, ["lead-in", "answer"]);
-    assert.deepEqual(tool_turn.content[0], { type: "text", text: "lead-in", citations: null });
+    assert.deepEqual(seen, ["preface", "answer"]);
+    assert.deepEqual(tool_turn.content[0], { type: "text", text: "preface", citations: null });
 
     const controller = new AbortController();
     controller.abort();

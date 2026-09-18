@@ -4,7 +4,7 @@ export {
   ALLY_DEFAULT_MODE,
 }
 
-import { Chatbot, type ReplyStream } from "#core/bot.js";
+import { Chatbot, type ReplyStream, type ToolRound } from "#core/bot.js";
 import { ContextAssembler } from "#core/context.js";
 import type { HistorySource, ProjectContextSource } from "#core/context.js";
 import type { Model } from "#core/model.js";
@@ -53,6 +53,11 @@ class Ally {
   // What happened during the most recent respond: rounds, tool calls, tokens.
   trace(): BotTrace {
     return this._bot.trace();
+  }
+
+  // The tool rounds behind the most recent respond, as a caller may show them.
+  tool_rounds(): ToolRound[] {
+    return this._bot.tool_rounds();
   }
 }
 

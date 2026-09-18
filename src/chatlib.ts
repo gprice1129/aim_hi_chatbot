@@ -52,11 +52,8 @@ export type {
 
 export type {
   ReplyStream,
+  ToolRound,
 } from "#core/bot.js";
-
-export type {
-  TraceStep,
-} from "#core/trace.js";
 
 export {
   ModelProfile,

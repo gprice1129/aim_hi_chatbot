@@ -3,6 +3,7 @@ export {
   ChatbotMode,
   ReplyStream,
   ReplyOpts,
+  ToolRound,
   Chatbot,
 }
 
@@ -14,7 +15,7 @@ import {
 } from "#core/model.js";
 import { Memory } from "#core/memory.js";
 import { BotFailure, type BotReply } from "#core/result.js";
-import { ToolRegistry, type ToolCall } from "#core/tool.js";
+import { ToolRegistry, type ToolCall, type ToolInput } from "#core/tool.js";
 import {
   empty_trace,
   note_model_call,
@@ -45,12 +46,23 @@ interface ChatbotOpts {
 // The model's stream plus the one event only the reply loop can raise: a
 // turn stopped to use tools and they are about to run. It fires once per
 // round, after the turn is complete, so the text delivered since the previous
-// event (or since the start) was that round's lead-in, not the answer.
+// event (or since the start) was that round's preface, not the answer.
 type ReplyStream = ModelStream & {
   on_tool_calls?: (calls: ToolCall[]) => void;
 };
 interface ReplyOpts extends ModelOpts {
   stream?: ReplyStream;
+}
+
+/*
+ * Idea: One round of a reply that stopped to use tools.
+ *
+ * This is what a caller may know about a reply's tool use, offered as plain
+ * data with no tool output in it. The text is in blocks, as a reply is.
+ */
+interface ToolRound {
+  text: string[];
+  calls: { name: string; input: ToolInput; ok: boolean }[];
 }
 
 class Chatbot {
@@ -61,6 +73,7 @@ class Chatbot {
   private _tools: ToolRegistry | null;
   private _max_tool_rounds: number;
   private _last_trace: BotTrace;
+  private _last_tool_rounds: ToolRound[];
 
   constructor(opts: ChatbotOpts) {
     this._model = opts.model;
@@ -70,6 +83,7 @@ class Chatbot {
     this._tools = opts.tools ?? null;
     this._max_tool_rounds = opts.max_tool_rounds ?? DEFAULT_MAX_TOOL_ROUNDS;
     this._last_trace = empty_trace();
+    this._last_tool_rounds = [];
   }
 
   /*
@@ -164,11 +178,24 @@ class Chatbot {
   /*
    * (void) => BotTrace
    * What happened during the most recent gen_reply. Empty before the first.
+   * A copy, so the caller cannot alter the record.
    * Pure
    * Public
    */
   public trace(): BotTrace {
-    return this._last_trace;
+    return structuredClone(this._last_trace);
+  }
+
+  /*
+   * (void) => ToolRound[]
+   * The tool rounds of the most recent gen_reply, in order. Empty before the
+   * first, and empty for a reply that used no tools. A copy, so the caller
+   * cannot alter the record.
+   * Pure
+   * Public
+   */
+  public tool_rounds(): ToolRound[] {
+    return structuredClone(this._last_tool_rounds);
   }
 
   /*
@@ -190,6 +217,8 @@ class Chatbot {
     // Assigned before the loop so an early return still leaves what happened.
     const trace = empty_trace();
     this._last_trace = trace;
+    const tool_rounds: ToolRound[] = [];
+    this._last_tool_rounds = tool_rounds;
 
     for (let round = 0; ; round++) {
       let msg: ModelMessage;
@@ -229,7 +258,15 @@ class Chatbot {
         }
         throw err;
       }
-      note_tool_results(trace, round, msg, calls, results);
+      note_tool_results(trace, round, calls, results);
+      tool_rounds.push({
+        text: _preface(msg),
+        calls: calls.map((call, i) => ({
+          name: call.name,
+          input: call.input,
+          ok: results[i].ok
+        })),
+      });
       // The request and its results enter memory together, once the tools
       // have run: the API rejects a transcript holding a tool request with no
       // answer, so a round that ends early must leave memory as it found it.
@@ -237,4 +274,14 @@ class Chatbot {
       this.add_memory(this._model.tool_results_to_memory(results));
     }
   }
+}
+
+/*
+ * (ModelMessage) => string[]
+ * The text blocks a turn wrote before asking for tools.
+ * Pure
+ * Private
+ */
+function _preface(msg: ModelMessage): string[] {
+  return msg.content.flatMap((block) => "text" === block.type ? [block.text] : []);
 }
