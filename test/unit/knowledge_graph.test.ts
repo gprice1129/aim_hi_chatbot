@@ -11,6 +11,7 @@ import {
   NODE_RELATIONS,
   type GraphNode,
   type SearchFilters,
+  type SubjectOutline,
   type KnowledgeGraphSource,
 } from "knowledge_graph";
 
@@ -25,6 +26,7 @@ const NODES: GraphNode[] = [
     deprecated: false,
     audiences: ["researcher", "clinician"],
     aliases: ["fake references", "bogus citations"],
+    subject: "ai",
     edges: {
       parent: ["m03-evaluating-ai-output"],
       governed_by: ["phi-and-hipaa-in-ai-tools"],
@@ -41,6 +43,7 @@ const NODES: GraphNode[] = [
     deprecated: false,
     audiences: ["researcher", "developer"],
     aliases: ["transcription"],
+    subject: "ai",
     edges: {
       uses_tool: ["whisper"],
       governed_by: ["phi-and-hipaa-in-ai-tools"],
@@ -57,6 +60,7 @@ const NODES: GraphNode[] = [
     deprecated: false,
     audiences: ["developer"],
     aliases: ["speech to text"],
+    subject: "ai",
     edges: { parent: ["m07-media"] },
     body: "# Whisper\n\nA transcription model that runs on audio locally.",
   },
@@ -70,13 +74,41 @@ const NODES: GraphNode[] = [
     deprecated: false,
     audiences: ["clinician", "researcher"],
     aliases: ["hipaa policy"],
+    subject: "ai",
     edges: {},
     body: "# PHI and HIPAA in AI tools\n\nPatient data must stay inside the approved boundary.",
   },
 ];
 
+// A module as the outline reports it; only id, title, type, and subject
+// matter to the tools.
+function module(id: string, title: string, subject: string): GraphNode {
+  return {
+    id, title, subject, type: "module", summary: "", level: null,
+    draft: false, deprecated: false, audiences: [], aliases: [], edges: {}, body: "",
+  };
+}
+
+const OUTLINE: SubjectOutline[] = [
+  { subject: "ai", modules: [module("ai-evaluating-output", "Judging AI output", "ai")] },
+  { subject: "uab", modules: [
+    module("uab-email-and-outlook", "Email and Outlook at UAB", "uab"),
+    module("uab-identity-and-access", "Identity and access at UAB", "uab"),
+  ] },
+];
+
 class FakeGraph implements KnowledgeGraphSource {
   public last_filters: SearchFilters = { limit: 0 };
+
+  private readonly _outline: SubjectOutline[];
+
+  constructor(outline: SubjectOutline[] = OUTLINE) {
+    this._outline = outline;
+  }
+
+  public async outline(): Promise<SubjectOutline[]> {
+    return this._outline;
+  }
 
   public async get(id: string): Promise<GraphNode | null> {
     return NODES.find((n) => n.id === id) ?? null;
@@ -91,7 +123,7 @@ class FakeGraph implements KnowledgeGraphSource {
 }
 
 const source = new FakeGraph();
-const [search_tool, get_tool] = make_knowledge_graph_tools(source);
+const [search_tool, get_tool] = await make_knowledge_graph_tools(source);
 
 // Tools answer in JSON so the model gets an unambiguous structure; tests read
 // it back the same way.
@@ -139,6 +171,35 @@ describe("ontology terms the tools state to the model", () => {
         get_tool.description.includes(relation),
         `${KG_GET} does not name the '${relation}' relation`);
     }
+  });
+});
+
+describe(`${KG_SEARCH} coverage`, () => {
+  it("names every subject and every module title in its description", () => {
+    for (const row of OUTLINE) {
+      assert.ok(search_tool.description.includes(`${row.subject} (`), row.subject);
+      for (const m of row.modules) {
+        assert.ok(search_tool.description.includes(m.title), m.title);
+      }
+    }
+  });
+
+  it("offers the subjects as a filter and forwards the choice", async () => {
+    assert.deepEqual(search_tool.schema.properties["subject"].items?.choices, ["ai", "uab"]);
+    await call(search_tool, { query: "citations", subject: ["uab"] });
+    assert.deepEqual(source.last_filters.subjects, ["uab"]);
+  });
+
+  it("omits the subject filter, and the subject names, for a corpus with no subject level", async () => {
+    const flat = new FakeGraph([{ subject: "", modules: [module("m07-media", "Media", "")] }]);
+    const [flat_search] = await make_knowledge_graph_tools(flat);
+    assert.equal("subject" in flat_search.schema.properties, false);
+    assert.ok(flat_search.description.includes("The graph covers: Media."));
+  });
+
+  it("says so when the graph has no modules at all", async () => {
+    const [empty_search] = await make_knowledge_graph_tools(new FakeGraph([]));
+    assert.ok(empty_search.description.includes("The graph is empty."));
   });
 });
 
