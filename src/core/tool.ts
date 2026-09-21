@@ -12,7 +12,7 @@ export type {
   Tool,
 }
 
-import type { Result } from "common";
+import { unless_aborted, type Result } from "common";
 
 /*
  * Main Concept
@@ -124,15 +124,19 @@ class ToolRegistry {
   /*
    * Idea: Execute multiple requested tool calls
    *
-   * (ToolCall[]) => ToolResult[]
+   * (ToolCall[], AbortSignal?) => ToolResult[]
    * Execute a turn's calls concurrently, preserving request order in the
-   * results. Providers may request several tools in one turn, and they are
-   * independent by construction.
-   * Side Effect: runs the tools, which may perform I/O
+   * results. Providers may request several tools in one turn. An aborted signal
+   * rejects with AbortError so the host can stop the reply. The abort does not
+   * stop a running tool call but the result of the tool call will be dropped.
+   * Side Effect: Runs the tools, which may perform I/O
    * Public
    */
-  public async run_all(calls: ToolCall[]): Promise<ToolResult[]> {
-    return Promise.all(calls.map((call) => this.run(call)));
+  public async run_all(calls: ToolCall[], signal?: AbortSignal): Promise<ToolResult[]> {
+    signal?.throwIfAborted();
+    const running = Promise.all(calls.map((call) => this.run(call)));
+    if (undefined === signal) return running;
+    return unless_aborted(running, signal);
   }
 }
 

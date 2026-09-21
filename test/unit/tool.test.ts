@@ -87,4 +87,32 @@ describe("ToolRegistry", () => {
     ]);
     assert.deepEqual(results.map((r) => (r.ok ? r.value : null)), ["waited", "opened"]);
   });
+
+  it("rejects a batch when its signal aborts", async () => {
+    let open: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const registry = new ToolRegistry([
+      stub("waiter", async () => { await gate; return { ok: true, value: "waited" }; }),
+    ]);
+    const controller = new AbortController();
+    const pending = registry.run_all(
+      [{ id: "1", name: "waiter", input: {} }],
+      controller.signal);
+    controller.abort();
+    open();
+    await assert.rejects(pending, { name: "AbortError" });
+  });
+
+  it("refuses to start a batch on a signal already aborted", async () => {
+    let ran = 0;
+    const registry = new ToolRegistry([
+      stub("counter", async () => { ran++; return { ok: true, value: "ran" }; }),
+    ]);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      registry.run_all([{ id: "1", name: "counter", input: {} }], controller.signal),
+      { name: "AbortError" });
+    assert.equal(ran, 0);
+  });
 });

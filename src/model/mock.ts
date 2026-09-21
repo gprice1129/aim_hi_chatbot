@@ -31,11 +31,20 @@ import { as_tool_input } from "#core/tool_input.js";
 // A scripted turn that asks for tools. Several calls in one entry model a
 // provider requesting them together in a single turn.
 interface MockToolRequest {
+  // Preface: text the turn writes before its calls.
+  text?: string;
   calls: { name: string; input?: ToolInput }[];
 }
 
+// A scripted turn whose text arrives in pieces, as a provider streams it. The
+// abort signal is checked before each piece, so a host that aborts mid-turn
+// sees the turn reject after the pieces it had received, and no more.
+interface MockStreamedReply {
+  deltas: string[];
+}
+
 // One scripted turn: text ends the turn, a tool request continues it.
-type MockReply = string | MockToolRequest;
+type MockReply = string | MockStreamedReply | MockToolRequest;
 
 interface MockModelOpts {
   // Reply returned once any scripted replies are exhausted.
@@ -88,18 +97,34 @@ class MockModel implements Model {
   /*
    * (Memory[], ModelOpts) => ModelMessage
    * Record the call and return a canned assistant message. No network I/O.
-   * Side Effect: records the call
+   * Like the provider, a streamed turn's text goes to opts.stream.on_event as
+   * text events, a whole one is seen only as the message, and an aborted
+   * abort_signal rejects: before the turn, or between the pieces of a turn
+   * scripted in pieces.
+   * Side Effect: records the call; calls opts.stream.on_event
    * Public
    */
   public async gen_message(memories: Memory[], opts: ModelOpts): Promise<ModelMessage> {
     // Copy: the caller keeps mutating its memory list across a tool loop, and a
     // recorded call must stay a snapshot of what this turn actually saw.
     this._calls.push({ memories: [...memories], opts });
+    opts.stream?.abort_signal.throwIfAborted();
     const scripted = this._scripted.length > 0
       ? this._scripted.shift() as MockReply
       : this._reply;
-    if ("string" === typeof scripted) return _mock_message(scripted);
-    return _mock_tool_message(scripted.calls.map((call) => ({
+    if ("string" === typeof scripted) {
+      opts.stream?.on_event({ type: "text", text: scripted });
+      return _mock_message(scripted);
+    }
+    if ("deltas" in scripted) {
+      for (const delta of scripted.deltas) {
+        opts.stream?.abort_signal.throwIfAborted();
+        opts.stream?.on_event({ type: "text", text: delta });
+      }
+      return _mock_message(scripted.deltas.join(""));
+    }
+    if (scripted.text) opts.stream?.on_event({ type: "text", text: scripted.text });
+    return _mock_tool_message(scripted.text, scripted.calls.map((call) => ({
       id: `toolu_mock_${this._next_tool_id++}`,
       name: call.name,
       input: call.input ?? {},
@@ -183,22 +208,25 @@ function _mock_message(text: string): Anthropic.Message {
 }
 
 /*
- * ({id, name, input}[]) => Anthropic.Message
+ * (string | undefined, {id, name, input}[]) => Anthropic.Message
  * Build an assistant Message that stops to request tools, mirroring what the
- * provider sends so the loop under test is the real one.
+ * provider sends (an optional preface, then the calls) so the loop under
+ * test is the real one.
  * Pure
  * Private
  */
 function _mock_tool_message(
+    text: string | undefined,
     calls: { id: string; name: string; input: ToolInput }[]): Anthropic.Message {
+  const preface: Anthropic.ContentBlock[] = text ? [{ type: "text", text, citations: null }] : [];
   return _envelope(
-    calls.map((call): Anthropic.ToolUseBlock => ({
+    [...preface, ...calls.map((call): Anthropic.ToolUseBlock => ({
       type: "tool_use",
       id: call.id,
       name: call.name,
       input: call.input,
       caller: { type: "direct" },
-    })),
+    }))],
     "tool_use");
 }
 

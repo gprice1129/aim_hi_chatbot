@@ -1,34 +1,83 @@
 export {
   ModelMessage,
+  ModelEffortScale,
   ModelEffort,
+  ModelThinkingMode,
   ModelThinking,
+  ModelCacheTtl,
   ModelCaching,
   ModelOutputLimit,
   ModelOpts,
   Model,
 }
-export {
-  AnthropicModelEffortScale as ModelEffortScale,
-  AnthropicModelThinkingMode as ModelThinkingMode,
-  AnthropicModelCacheTtl as ModelCacheTtl,
-} from "#model/anthropic.js";
 
 import { Anthropic } from "@anthropic-ai/sdk";
-import {
-  AnthropicModelEffort,
-  AnthropicModelThinking,
-  AnthropicModelCaching,
-  AnthropicModelOutputLimit,
-  AnthropicModelOpts } from "#model/anthropic.js";
 import { Memory } from "#core/memory.js";
-import { ToolCall, ToolResult } from "#core/tool.js";
+import { Tool, ToolCall, ToolResult } from "#core/tool.js";
+import type { ReplyStream } from "#core/stream.js";
 
+/*
+ * Main Concept
+ * -----------------------------------------------------------------------------
+ * This file defines what a model is to the rest of the package: the options a
+ * caller may set on a turn, the stream a caller observes it through, and the
+ * operations every model answers. None of it names a provider. A provider's
+ * implementation translates each of these into its own API.
+ */
+
+// A message as the provider returns it. Still the Anthropic shape: the
+// operations below read it, so a caller never has to.
 type ModelMessage = Anthropic.Message;
-type ModelEffort = AnthropicModelEffort;
-type ModelThinking = AnthropicModelThinking;
-type ModelCaching = AnthropicModelCaching;
-type ModelOutputLimit = AnthropicModelOutputLimit;
-type ModelOpts = AnthropicModelOpts;
+
+// How hard the model tries, where a model offers the choice.
+enum ModelEffortScale {
+  Low = "low",
+  Medium = "medium",
+  High = "high",
+  Max = "max",
+}
+
+type ModelEffort = ModelEffortScale | null;
+
+enum ModelThinkingMode {
+  Adaptive = "adaptive",
+  Enabled = "enabled",
+  Disabled = "disabled",
+}
+
+// Whether and how the model reasons before answering. null leaves it unset;
+// which modes a model accepts is the provider's to check.
+type ModelThinking =
+  | { type: ModelThinkingMode.Adaptive }
+  | { type: ModelThinkingMode.Enabled, budget_tokens: number }
+  | { type: ModelThinkingMode.Disabled }
+  | null;
+
+enum ModelCacheTtl {
+  FiveMinutes = "5m",
+  OneHour = "1h",
+}
+
+// How long the request prefix may be cached; null disables caching.
+type ModelCaching = ModelCacheTtl | null;
+
+// Hard cap on output tokens (thinking + text) per response.
+type ModelOutputLimit = number;
+
+/*
+ * Idea: How one turn should be generated.
+ */
+interface ModelOpts {
+  // Present, the reply is produced as it is written and each piece reaches
+  // on_event; absent, it is generated whole and seen only as the message.
+  stream?: ReplyStream;
+  system_prompt?: string;
+  tools?: Tool[];
+  effort?: ModelEffort;
+  thinking?: ModelThinking;
+  caching?: ModelCaching;
+  max_tokens?: ModelOutputLimit;
+}
 
 interface Model {
   str_to_memory(arg0: string): Memory;

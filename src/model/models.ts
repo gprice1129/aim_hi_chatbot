@@ -9,15 +9,15 @@ import { Endpoint } from "#core/types.js";
 import {
   Model,
   ModelEffort,
+  ModelEffortScale,
   ModelThinking,
+  ModelThinkingMode,
   ModelCaching,
   ModelOutputLimit,
 } from "#core/model.js";
 import {
   AnthropicModel,
   AnthropicModelType,
-  AnthropicModelEffortScale,
-  AnthropicModelThinkingMode,
 } from "#model/anthropic.js";
 
 /*
@@ -56,10 +56,10 @@ const _PROFILE_PARAMS: Record<ModelProfile, ModelParams> = {
     effort: null, thinking: null, caching: null, max_tokens: 8192 },
   [ModelProfile.Chat]: {
     effort: null,
-    thinking: { type: AnthropicModelThinkingMode.Adaptive },
+    thinking: { type: ModelThinkingMode.Adaptive },
     caching: null, max_tokens: 8192 },
   [ModelProfile.Deep]: {
-    effort: AnthropicModelEffortScale.Max,
+    effort: ModelEffortScale.Max,
     thinking: null, caching: null, max_tokens: 16384 },
   [ModelProfile.Summary]: {
     effort: null, thinking: null, caching: null, max_tokens: 512 },

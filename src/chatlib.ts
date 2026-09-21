@@ -50,6 +50,12 @@ export type {
   BotReply,
 } from "#core/result.js";
 
+export type {
+  ReplyEvent,
+  ReplyStream,
+  ToolRound,
+} from "#core/stream.js";
+
 export {
   ModelProfile,
   make_model,

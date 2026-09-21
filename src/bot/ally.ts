@@ -5,6 +5,7 @@ export {
 }
 
 import { Chatbot } from "#core/bot.js";
+import type { ReplyStream, ToolRound } from "#core/stream.js";
 import { ContextAssembler } from "#core/context.js";
 import type { HistorySource, ProjectContextSource } from "#core/context.js";
 import type { Model } from "#core/model.js";
@@ -36,6 +37,7 @@ class Ally {
     history: HistorySource,
     project: ProjectContextSource,
     message: string,
+    stream?: ReplyStream,
   ): Promise<BotReply> {
     const { system, messages } = await this._assembler.assemble({
       system_prompt: this._system_prompt,
@@ -46,12 +48,17 @@ class Ally {
     for (const turn of messages) {
       this._bot.add_memory(turn);
     }
-    return this._bot.gen_reply({ system_prompt: system });
+    return this._bot.gen_reply({ stream, system_prompt: system });
   }
 
   // What happened during the most recent respond: rounds, tool calls, tokens.
   trace(): BotTrace {
     return this._bot.trace();
+  }
+
+  // The tool rounds behind the most recent respond, as a caller may show them.
+  tool_rounds(): ToolRound[] {
+    return this._bot.tool_rounds();
   }
 }
 
