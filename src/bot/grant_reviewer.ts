@@ -5,7 +5,8 @@ export {
   GRANT_REVIEW_MODES,
 }
 
-import { Chatbot, type ChatbotMode, type ReplyStream } from "#core/bot.js";
+import { Chatbot, type ChatbotMode } from "#core/bot.js";
+import type { ReplyStream } from "#core/stream.js";
 import { ContextAssembler } from "#core/context.js";
 import type { Model } from "#core/model.js";
 import type { BotReply } from "#core/result.js";

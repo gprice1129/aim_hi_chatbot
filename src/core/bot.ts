@@ -1,9 +1,6 @@
 export {
   ChatbotOpts,
   ChatbotMode,
-  ReplyStream,
-  ReplyOpts,
-  ToolRound,
   Chatbot,
 }
 
@@ -11,11 +8,11 @@ import {
   Model,
   ModelOpts,
   ModelMessage,
-  type ModelStream
 } from "#core/model.js";
+import type { ToolCallSummary, ToolRound } from "#core/stream.js";
 import { Memory } from "#core/memory.js";
 import { BotFailure, type BotReply } from "#core/result.js";
-import { ToolRegistry, type ToolCall, type ToolInput } from "#core/tool.js";
+import { ToolRegistry, type ToolCall } from "#core/tool.js";
 import {
   empty_trace,
   note_model_call,
@@ -41,28 +38,6 @@ interface ChatbotOpts {
   // Tools this bot may call. Omit for a bot that only converses.
   tools?: ToolRegistry;
   max_tool_rounds?: number;
-}
-
-// The model's stream plus the one event only the reply loop can raise: a
-// turn stopped to use tools and they are about to run. It fires once per
-// round, after the turn is complete, so the text delivered since the previous
-// event (or since the start) was that round's preface, not the answer.
-type ReplyStream = ModelStream & {
-  on_tool_calls?: (calls: ToolCall[]) => void;
-};
-interface ReplyOpts extends ModelOpts {
-  stream?: ReplyStream;
-}
-
-/*
- * Idea: One round of a reply that stopped to use tools.
- *
- * This is what a caller may know about a reply's tool use, offered as plain
- * data with no tool output in it. The text is in blocks, as a reply is.
- */
-interface ToolRound {
-  text: string[];
-  calls: { name: string; input: ToolInput; ok: boolean }[];
 }
 
 class Chatbot {
@@ -199,7 +174,7 @@ class Chatbot {
   }
 
   /*
-   * (ReplyOpts) => BotReply
+   * (ModelOpts) => BotReply
    * Generate a message and return a usable reply or a classified failure.
    *
    * When the bot has tools, this is the agentic loop for tool usage.
@@ -208,9 +183,9 @@ class Chatbot {
    * Side Effect: network calls to the model; runs tools; mutates memory state
    * Public
    */
-  public async gen_reply(opts: ReplyOpts): Promise<BotReply> {
-    const reply_stream = opts.stream;
-    const abort_signal = reply_stream?.abort_signal;
+  public async gen_reply(opts: ModelOpts): Promise<BotReply> {
+    const stream = opts.stream;
+    const abort_signal = stream?.abort_signal;
     const registry = this._tools;
     const offered = null === registry ? [] : registry.tools();
     const call_opts = offered.length > 0 ? { ...opts, tools: offered } : opts;
@@ -247,7 +222,7 @@ class Chatbot {
         return { ok: false, error: { failure: BotFailure.TOOL_LIMIT } };
       }
 
-      reply_stream?.on_tool_calls?.(calls);
+      stream?.on_event({ type: "tool_calls", calls: calls.map(_summary) });
       let results;
       try {
         results = await registry.run_all(calls, abort_signal);
@@ -259,14 +234,16 @@ class Chatbot {
         throw err;
       }
       note_tool_results(trace, round, calls, results);
-      tool_rounds.push({
+      const tool_round: ToolRound = {
         text: _preface(msg),
         calls: calls.map((call, i) => ({
           name: call.name,
           input: call.input,
           ok: results[i].ok
         })),
-      });
+      };
+      tool_rounds.push(tool_round);
+      stream?.on_event({ type: "tool_round", round: tool_round });
       // The request and its results enter memory together, once the tools
       // have run: the API rejects a transcript holding a tool request with no
       // answer, so a round that ends early must leave memory as it found it.
@@ -284,4 +261,13 @@ class Chatbot {
  */
 function _preface(msg: ModelMessage): string[] {
   return msg.content.flatMap((block) => "text" === block.type ? [block.text] : []);
+}
+
+/*
+ * (ToolCall) => ToolCallSummary
+ * Pure
+ * Private
+ */
+function _summary(call: ToolCall): ToolCallSummary {
+  return { name: call.name, input: call.input };
 }

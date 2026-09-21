@@ -256,13 +256,26 @@ describe("Chatbot tool loop", () => {
     const events: string[] = [];
 
     await bot.gen_reply({ stream: {
-      on_delta: (text) => events.push(`text:${text}`),
-      on_tool_calls: (calls) => events.push(`tools:${calls.map((c) => c.name)} ran:${tool.seen.length}`),
+      on_event: (event) => {
+        if ("text" === event.type) events.push(`text:${event.text}`);
+        if ("tool_calls" === event.type) {
+          events.push(`calls:${event.calls.map((c) => c.name)} ran:${tool.seen.length}`);
+        }
+        if ("tool_round" === event.type) {
+          events.push(`round:${event.round.text} ok:${event.round.calls.map((c) => c.ok)}`);
+        }
+      },
       abort_signal: new AbortController().signal,
     } });
 
-    // Announced before the tools run, so a host can show progress while they do.
-    assert.deepEqual(events, ["text:Let me look.", "tools:kg_search ran:0", "text:Found it."]);
+    // Calls are announced before the tools run, so a host can show progress
+    // while they do; the round follows with the preface and the outcomes.
+    assert.deepEqual(events, [
+      "text:Let me look.",
+      "calls:kg_search ran:0",
+      "round:Let me look. ok:true",
+      "text:Found it.",
+    ]);
     assert.deepEqual(bot.tool_rounds(), [
       { text: ["Let me look."], calls: [{ name: "kg_search", input: { q: "phi" }, ok: true }] },
     ]);
@@ -278,7 +291,7 @@ describe("Chatbot tool loop", () => {
     controller.abort();
     const bot = new Chatbot({ model: new MockModel() });
 
-    const reply = await bot.gen_reply({ stream: { on_delta: () => {}, abort_signal: controller.signal } });
+    const reply = await bot.gen_reply({ stream: { on_event: () => {}, abort_signal: controller.signal } });
 
     assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
   });
@@ -303,7 +316,7 @@ describe("Chatbot tool loop", () => {
     });
     const bot = new Chatbot({ model, tools: new ToolRegistry([tool]) });
 
-    const pending = bot.gen_reply({ stream: { on_delta: () => {}, abort_signal: controller.signal } });
+    const pending = bot.gen_reply({ stream: { on_event: () => {}, abort_signal: controller.signal } });
     await seen_start;
     controller.abort();
 
@@ -325,7 +338,11 @@ describe("Chatbot tool loop", () => {
     const seen: string[] = [];
 
     const reply = await bot.gen_reply({ stream: {
-      on_delta: (text) => { seen.push(text); controller.abort(); },
+      on_event: (event) => {
+        if ("text" !== event.type) return;
+        seen.push(event.text);
+        controller.abort();
+      },
       abort_signal: controller.signal,
     } });
 
@@ -346,7 +363,9 @@ describe("Chatbot tool loop", () => {
     const bot = new Chatbot({ model, tools: new ToolRegistry([recorder("kg_search")]) });
 
     const reply = await bot.gen_reply({ stream: {
-      on_delta: (text) => { if ("Found " === text) controller.abort(); },
+      on_event: (event) => {
+        if ("text" === event.type && "Found " === event.text) controller.abort();
+      },
       abort_signal: controller.signal,
     } });
 
@@ -379,7 +398,7 @@ describe("Chatbot tool loop", () => {
     };
     const bot = new Chatbot({ model: failing });
 
-    const reply = await bot.gen_reply({ stream: { on_delta: () => {}, abort_signal: controller.signal } });
+    const reply = await bot.gen_reply({ stream: { on_event: () => {}, abort_signal: controller.signal } });
 
     assert.equal(reply.ok ? null : reply.error.failure, BotFailure.CANCELLED);
     assert.match(String(reply.ok ? "" : reply.error.cause), /upstream 503/);

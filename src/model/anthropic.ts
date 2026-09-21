@@ -15,8 +15,8 @@ import {
   ModelCacheTtl,
   ModelOutputLimit,
   ModelOpts,
-  ModelStream,
 } from "#core/model.js";
+import type { ReplyStream } from "#core/stream.js";
 import { Memory } from "#core/memory.js";
 import {
   ToolParamType,
@@ -66,7 +66,7 @@ type _AnthropicOpts = Required<Pick<ModelOpts, "effort"
 // One turn's request
 type _AnthropicRequest =
   | { params: Anthropic.MessageCreateParamsNonStreaming; stream?: undefined }
-  | { params: Anthropic.MessageCreateParamsStreaming; stream: ModelStream };
+  | { params: Anthropic.MessageCreateParamsStreaming; stream: ReplyStream };
 
 
 class AnthropicModel implements Model {
@@ -106,7 +106,7 @@ class AnthropicModel implements Model {
   /*
    * (Memory[], ModelOpts) => ModelMessage
    * Generate one turn. Turn generation can be configured via ModelOpts.
-   * Side Effect: network call to the provider; calls opts.stream.on_delta
+   * Side Effect: network call to the provider; calls opts.stream.on_event
    * Public
    */
   public async gen_message(memories: Anthropic.MessageParam[],
@@ -118,7 +118,7 @@ class AnthropicModel implements Model {
     // The host's abort signal is an SDK request option, not an API parameter.
     const request_opts = { signal: stream.abort_signal };
     const request = this._client.messages.stream(params, request_opts);
-    request.on("text", stream.on_delta);
+    request.on("text", (text) => stream.on_event({ type: "text", text }));
     return await request.finalMessage();
   }
 

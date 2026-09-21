@@ -4,7 +4,8 @@ export {
   ALLY_DEFAULT_MODE,
 }
 
-import { Chatbot, type ReplyStream, type ToolRound } from "#core/bot.js";
+import { Chatbot } from "#core/bot.js";
+import type { ReplyStream, ToolRound } from "#core/stream.js";
 import { ContextAssembler } from "#core/context.js";
 import type { HistorySource, ProjectContextSource } from "#core/context.js";
 import type { Model } from "#core/model.js";

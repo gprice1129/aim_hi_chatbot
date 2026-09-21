@@ -97,11 +97,11 @@ class MockModel implements Model {
   /*
    * (Memory[], ModelOpts) => ModelMessage
    * Record the call and return a canned assistant message. No network I/O.
-   * Like the provider, a streamed turn's text goes to opts.stream.on_delta, a
-   * whole one is seen only as the message, and an aborted abort_signal
-   * rejects: before the turn, or between the pieces of a turn scripted in
-   * pieces.
-   * Side Effect: records the call; calls opts.stream.on_delta
+   * Like the provider, a streamed turn's text goes to opts.stream.on_event as
+   * text events, a whole one is seen only as the message, and an aborted
+   * abort_signal rejects: before the turn, or between the pieces of a turn
+   * scripted in pieces.
+   * Side Effect: records the call; calls opts.stream.on_event
    * Public
    */
   public async gen_message(memories: Memory[], opts: ModelOpts): Promise<ModelMessage> {
@@ -113,17 +113,17 @@ class MockModel implements Model {
       ? this._scripted.shift() as MockReply
       : this._reply;
     if ("string" === typeof scripted) {
-      opts.stream?.on_delta(scripted);
+      opts.stream?.on_event({ type: "text", text: scripted });
       return _mock_message(scripted);
     }
     if ("deltas" in scripted) {
       for (const delta of scripted.deltas) {
         opts.stream?.abort_signal.throwIfAborted();
-        opts.stream?.on_delta(delta);
+        opts.stream?.on_event({ type: "text", text: delta });
       }
       return _mock_message(scripted.deltas.join(""));
     }
-    if (scripted.text) opts.stream?.on_delta(scripted.text);
+    if (scripted.text) opts.stream?.on_event({ type: "text", text: scripted.text });
     return _mock_tool_message(scripted.text, scripted.calls.map((call) => ({
       id: `toolu_mock_${this._next_tool_id++}`,
       name: call.name,

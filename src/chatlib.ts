@@ -51,9 +51,10 @@ export type {
 } from "#core/result.js";
 
 export type {
+  ReplyEvent,
   ReplyStream,
   ToolRound,
-} from "#core/bot.js";
+} from "#core/stream.js";
 
 export {
   ModelProfile,

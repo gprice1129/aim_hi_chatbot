@@ -52,14 +52,14 @@ describe("MockModel", () => {
   it("streams each turn's text, prefaces included, and rejects once aborted", async () => {
     const m = new MockModel({ replies: [{ text: "preface", calls: [{ name: "t" }] }, "answer"] });
     const seen: string[] = [];
-    const tool_turn = await m.gen_message([], { stream: { on_delta: (text) => seen.push(text), abort_signal: new AbortController().signal } });
-    await m.gen_message([], { stream: { on_delta: (text) => seen.push(text), abort_signal: new AbortController().signal } });
+    const tool_turn = await m.gen_message([], { stream: { on_event: (event) => { if ("text" === event.type) seen.push(event.text); }, abort_signal: new AbortController().signal } });
+    await m.gen_message([], { stream: { on_event: (event) => { if ("text" === event.type) seen.push(event.text); }, abort_signal: new AbortController().signal } });
     assert.deepEqual(seen, ["preface", "answer"]);
     assert.deepEqual(tool_turn.content[0], { type: "text", text: "preface", citations: null });
 
     const controller = new AbortController();
     controller.abort();
-    await assert.rejects(m.gen_message([], { stream: { on_delta: () => {}, abort_signal: controller.signal } }), { name: "AbortError" });
+    await assert.rejects(m.gen_message([], { stream: { on_event: () => {}, abort_signal: controller.signal } }), { name: "AbortError" });
   });
 });
 
@@ -68,7 +68,7 @@ describe("MockModel streamed turns", () => {
     const m = new MockModel({ replies: [{ deltas: ["one ", "two"] }] });
     const seen: string[] = [];
     const msg = await m.gen_message([], { stream: {
-      on_delta: (text) => seen.push(text), abort_signal: new AbortController().signal,
+      on_event: (event) => { if ("text" === event.type) seen.push(event.text); }, abort_signal: new AbortController().signal,
     } });
     assert.deepEqual(seen, ["one ", "two"]);
     assert.deepEqual(m.extract_content(msg), ["one two"]);
@@ -80,7 +80,7 @@ describe("MockModel streamed turns", () => {
     const seen: string[] = [];
     await assert.rejects(
       m.gen_message([], { stream: {
-        on_delta: (text) => { seen.push(text); controller.abort(); },
+        on_event: (event) => { if ("text" === event.type) { seen.push(event.text); controller.abort(); } },
         abort_signal: controller.signal,
       } }),
       { name: "AbortError" });

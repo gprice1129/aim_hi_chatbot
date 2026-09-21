@@ -8,13 +8,13 @@ export {
   ModelCaching,
   ModelOutputLimit,
   ModelOpts,
-  ModelStream,
   Model,
 }
 
 import { Anthropic } from "@anthropic-ai/sdk";
 import { Memory } from "#core/memory.js";
 import { Tool, ToolCall, ToolResult } from "#core/tool.js";
+import type { ReplyStream } from "#core/stream.js";
 
 /*
  * Main Concept
@@ -64,22 +64,13 @@ type ModelCaching = ModelCacheTtl | null;
 // Hard cap on output tokens (thinking + text) per response.
 type ModelOutputLimit = number;
 
-// What a host can observe and control while a model generates one turn.
-interface ModelStream {
-  // Receives each piece of reply text as the model writes it.
-  on_delta: (delta: string) => void;
-  // Aborts the turn. The provider call rejects, and the rejection is the host's
-  // to classify.
-  abort_signal: AbortSignal;
-}
-
 /*
  * Idea: How one turn should be generated.
  */
 interface ModelOpts {
   // Present, the reply is produced as it is written and each piece reaches
-  // on_delta; absent, it is generated whole and seen only as the message.
-  stream?: ModelStream;
+  // on_event; absent, it is generated whole and seen only as the message.
+  stream?: ReplyStream;
   system_prompt?: string;
   tools?: Tool[];
   effort?: ModelEffort;
