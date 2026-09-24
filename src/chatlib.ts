@@ -5,14 +5,12 @@
 export {
   make_ally,
   ALLY_MODES,
-  ALLY_SLUG,
 } from "#bot/ally.js";
 
 export {
   make_grant_reviewer,
   GrantReviewMode,
   GRANT_REVIEW_MODES,
-  GRANT_REVIEWER_SLUG,
 } from "#bot/grant_reviewer.js";
 
 export {

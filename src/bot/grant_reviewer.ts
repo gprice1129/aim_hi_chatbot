@@ -3,7 +3,6 @@ export {
   GrantReviewMode,
   GrantReviewContent,
   GRANT_REVIEW_MODES,
-  GRANT_REVIEWER_SLUG,
 }
 
 import { Chatbot, type ChatbotMode } from "#core/bot.js";
@@ -14,9 +13,6 @@ import type { BotReply } from "#core/result.js";
 import { compose_prompt, type PromptNode } from "#prompts/prompt_tree.js";
 
 import { ok_or_throw } from "common";
-
-// The Grant Reviewer's application slug. Must match its seeded applications row.
-const GRANT_REVIEWER_SLUG = "grant-reviewer";
 
 interface GrantReviewContent {
   rfa: string;

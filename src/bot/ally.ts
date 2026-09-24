@@ -2,7 +2,6 @@ export {
   make_ally,
   ALLY_MODES,
   ALLY_DEFAULT_MODE,
-  ALLY_SLUG,
 }
 
 import { Chatbot } from "#core/bot.js";
@@ -16,9 +15,6 @@ import type { BotTrace } from "#core/trace.js";
 import { compose_prompt, type PromptNode } from "#prompts/prompt_tree.js";
 
 import { ok_or_throw } from "common";
-
-// Ally's application slug. Must match its seeded applications row.
-const ALLY_SLUG = "ally";
 
 // The mode Ally is in until asked to be in another.
 const ALLY_DEFAULT_MODE = "general";
