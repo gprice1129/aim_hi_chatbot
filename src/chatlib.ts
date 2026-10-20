@@ -14,6 +14,37 @@ export {
 } from "#bot/grant_reviewer.js";
 
 export {
+  make_document_builder,
+  DOCUMENT_BUILDER_MODES,
+} from "#bot/document_builder.js";
+
+export type {
+  DocumentBuilder,
+} from "#bot/document_builder.js";
+
+export {
+  SectionStatus,
+  SectionSource,
+  parse_document_template,
+  parse_document_state,
+  empty_document,
+  migrate_document,
+  apply_section_update,
+} from "#core/document.js";
+
+export type {
+  DocumentTemplate,
+  TemplateSection,
+  DocumentState,
+  SectionState,
+  SectionUpdate,
+} from "#core/document.js";
+
+export {
+  UPDATE_SECTION,
+} from "#tools/document.js";
+
+export {
   make_chat_summarizer,
   CHAT_SUMMARY_MODES,
 } from "#bot/chat_summarizer.js";
@@ -36,6 +67,10 @@ export type {
 
 export {
   ToolRegistry,
+} from "#core/tool.js";
+
+export type {
+  Tool,
 } from "#core/tool.js";
 
 export {
