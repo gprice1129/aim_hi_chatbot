@@ -92,6 +92,32 @@ describe("DocumentBuilder.respond (via MockModel)", () => {
     assert.deepEqual(mock.calls()[0].opts.tools?.map((t) => t.name), ["kg_search", "kg_get", "update_section"]);
   });
 
+  it("offers set_title only when given the session's title, and reports the name given", async () => {
+    const without = new MockModel({ reply: "ok" });
+    const plain = make_document_builder(
+      without, DOCUMENT_BUILDER_PROMPTS, IRB_TEMPLATE, empty_document(IRB_TEMPLATE, NOW));
+    await plain.respond(history_of(), "hi");
+    assert.deepEqual(without.calls()[0].opts.tools?.map((t) => t.name), ["update_section"]);
+    assert.equal(plain.title(), null);
+
+    const mock = new MockModel({
+      replies: [
+        { calls: [{ name: "set_title", input: { title: "Opioid readmissions" } }] },
+        "Named it.",
+      ],
+    });
+    const builder = make_document_builder(
+      mock, DOCUMENT_BUILDER_PROMPTS, IRB_TEMPLATE, empty_document(IRB_TEMPLATE, NOW), [], undefined,
+      { title: "Untitled protocol", locked: false });
+
+    const reply = await builder.respond(history_of(), "It's about opioid readmissions.");
+
+    assert.deepEqual(reply, { ok: true, value: ["Named it."] });
+    assert.deepEqual(mock.calls()[0].opts.tools?.map((t) => t.name), ["update_section", "set_title"]);
+    assert.equal(builder.title(), "Opioid readmissions");
+    assert.deepEqual(builder.changed_sections(), []);
+  });
+
   it("replays history before the live turn", async () => {
     const mock = new MockModel({ reply: "ok" });
     const builder = make_document_builder(

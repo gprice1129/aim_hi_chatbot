@@ -21,6 +21,7 @@ import {
   type DocumentTemplate,
 } from "#core/document.js";
 import { UpdateSectionTool } from "#tools/document.js";
+import { SetTitleTool, type SessionTitle } from "#tools/title.js";
 import { compose_prompt, type ComposedPrompt, type PromptNode } from "#prompts/prompt_tree.js";
 
 import { ok_or_throw } from "common";
@@ -31,7 +32,8 @@ import { ok_or_throw } from "common";
  * A bot that interviews the user and writes a document as it learns. One
  * prompt serves every template: the template's guidance and the document as
  * it stands are composed into the system prompt each turn, and the bot writes
- * through the update_section tool.
+ * through the update_section tool. Given the session's title, it may also
+ * name the session through the set_title tool.
  */
 
 /*
@@ -60,18 +62,21 @@ class DocumentBuilder {
   private _prompt: ComposedPrompt;
   private _template: DocumentTemplate;
   private _tool: UpdateSectionTool;
+  private _title_tool: SetTitleTool | null;
 
   constructor(
       bot: Chatbot,
       assembler: ContextAssembler,
       prompt: ComposedPrompt,
       template: DocumentTemplate,
-      tool: UpdateSectionTool) {
+      tool: UpdateSectionTool,
+      title_tool: SetTitleTool | null) {
     this._bot = bot;
     this._assembler = assembler;
     this._prompt = prompt;
     this._template = template;
     this._tool = tool;
+    this._title_tool = title_tool;
   }
 
   /*
@@ -110,6 +115,11 @@ class DocumentBuilder {
     return this._tool.changed();
   }
 
+  // The name the most recent respond gave the session; null when it gave none.
+  title(): string | null {
+    return this._title_tool?.title() ?? null;
+  }
+
   trace(): BotTrace {
     return this._bot.trace();
   }
@@ -120,9 +130,10 @@ class DocumentBuilder {
 }
 
 /*
- * Signature: (Model, PromptNode, DocumentTemplate, DocumentState, Tool[], (() => string)?)
- *   => DocumentBuilder
- * `tools` are offered beside update_section; a knowledge base, say.
+ * Signature: (Model, PromptNode, DocumentTemplate, DocumentState, Tool[], (() => string)?,
+ *   SessionTitle?) => DocumentBuilder
+ * `tools` are offered beside update_section; a knowledge base, say. Given
+ * `title`, the session's title as the turn begins, set_title is offered too.
  * Pure
  * Public
  */
@@ -132,9 +143,12 @@ function make_document_builder(
     template: DocumentTemplate,
     document: DocumentState,
     tools: Tool[] = [],
-    now?: () => string): DocumentBuilder {
+    now?: () => string,
+    title?: SessionTitle): DocumentBuilder {
   const composed = ok_or_throw(compose_prompt(prompts, []), "DocumentBuilder");
   const tool = new UpdateSectionTool(template, document, now);
-  const bot = new Chatbot({ model, tools: new ToolRegistry([...tools, tool]) });
-  return new DocumentBuilder(bot, new ContextAssembler(), composed, template, tool);
+  const title_tool = undefined === title ? null : new SetTitleTool(title);
+  const offered = null === title_tool ? [...tools, tool] : [...tools, tool, title_tool];
+  const bot = new Chatbot({ model, tools: new ToolRegistry(offered) });
+  return new DocumentBuilder(bot, new ContextAssembler(), composed, template, tool, title_tool);
 }

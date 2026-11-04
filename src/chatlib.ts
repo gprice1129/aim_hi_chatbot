@@ -45,6 +45,15 @@ export {
 } from "#tools/document.js";
 
 export {
+  SET_TITLE,
+  TITLE_MAX_LENGTH,
+} from "#tools/title.js";
+
+export type {
+  SessionTitle,
+} from "#tools/title.js";
+
+export {
   make_chat_summarizer,
   CHAT_SUMMARY_MODES,
 } from "#bot/chat_summarizer.js";
