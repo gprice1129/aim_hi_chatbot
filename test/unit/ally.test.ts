@@ -9,7 +9,12 @@ import type { Memory } from "#core/memory.js";
 import type { DocumentContext, HistorySource, ProjectContextSource } from "#core/context.js";
 import { UpdateSectionTool } from "#tools/document.js";
 import { DocumentAuthor, empty_document, type DocumentTemplate } from "common";
-import { ALLY_PROMPTS, leaf } from "../support/prompts.ts";
+import { ALLY_PROMPTS, branch, leaf } from "../support/prompts.ts";
+
+// Ally's prompts with an opening turn declared on the mode it starts in.
+const OPENING_PROMPTS = branch("Ally", "You are Ally.\n\n{mode}", {
+  general: leaf("General", "Interview the user.", "Begin. Ask your first question."),
+});
 
 const TEMPLATE: DocumentTemplate = {
   id: "irb-test",
@@ -127,6 +132,33 @@ describe("Ally.respond (via MockModel)", () => {
     await make_ally(mock, ALLY_PROMPTS).respond(history_of(), no_project(), "hello");
 
     assert.ok(!(mock.calls()[0].opts.system_prompt ?? "").includes("The document being written"));
+  });
+
+  it("speaks first from the prompt's opening turn when given no message", async () => {
+    const mock = new MockModel({ reply: "Welcome. What is the study about?" });
+    const ally = make_ally(mock, OPENING_PROMPTS);
+
+    const reply = await ally.respond(history_of(), no_project(), null);
+
+    assert.deepEqual(reply, { ok: true, value: ["Welcome. What is the study about?"] });
+    assert.deepEqual(
+      mock.calls()[0].memories, [{ role: "user", content: "Begin. Ask your first question." }]);
+  });
+
+  it("takes the user's message over the opener when given both", async () => {
+    const mock = new MockModel({ reply: "ok" });
+
+    await make_ally(mock, OPENING_PROMPTS).respond(history_of(), no_project(), "hello");
+
+    assert.deepEqual(mock.calls()[0].memories, [{ role: "user", content: "hello" }]);
+  });
+
+  it("refuses to speak first under a prompt that declares no opening turn", async () => {
+    const mock = new MockModel({ reply: "ok" });
+    const ally = make_ally(mock, ALLY_PROMPTS);
+
+    await assert.rejects(() => ally.respond(history_of(), no_project(), null), /no opening turn/);
+    assert.equal(mock.calls().length, 0);
   });
 });
 
