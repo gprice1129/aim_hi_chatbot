@@ -6,6 +6,7 @@ import {
   DocumentAuthor,
   type Document,
   type DocumentTemplate,
+  type TemplateGuidance,
   type TemplateSection,
 } from "common";
 
@@ -13,38 +14,42 @@ import {
  * Main Concept
  * -----------------------------------------------------------------------------
  * This file defines how a document is shown to a model: every section its
- * template names, in order, with where it stands and who last wrote it.
+ * template names, in order, with what belongs in it, where it stands and who
+ * last wrote it.
  */
 
 /*
  * Application Usage
  * -----------------------------------------------------------------------------
- * The rendering is what a model reads to know what has been written and by
- * whom, so it can speak of the user's sections as the user's. Rewording it may
- * change model behaviour.
+ * The rendering is what a model reads to know what to write, what has been
+ * written and by whom, so it can speak of the user's sections as the user's.
+ * Rewording it may change model behaviour.
  */
 
 /*
  * Idea: The document as text a model reads.
  *
- * (DocumentTemplate, Document) => string
+ * (DocumentTemplate, TemplateGuidance, Document) => string
  * Sections the template does not name are left out.
  * Pure
  * Public
  */
-function render_document(template: DocumentTemplate, document: Document): string {
+function render_document(
+    template: DocumentTemplate, guidance: TemplateGuidance, document: Document): string {
   return template.sections
-    .map((section) => _render_section(section, document))
+    .map((section) => _render_section(section, guidance[section.id], document))
     .join("\n\n");
 }
 
 /*
- * (TemplateSection, Document) => string
+ * (TemplateSection, string, Document) => string
  * Pure
  * Private
  */
-function _render_section(section: TemplateSection, document: Document): string {
-  const heading = `### ${section.title} (id: ${section.id}${section.required ? ", required" : ""})`;
+function _render_section(section: TemplateSection, guidance: string, document: Document): string {
+  const heading =
+    `### ${section.title} (id: ${section.id}${section.required ? ", required" : ""})\n`
+    + `Belongs here: ${guidance}`;
   if (!Object.hasOwn(document.sections, section.id)) {
     return `${heading}\nNot written yet.`;
   }

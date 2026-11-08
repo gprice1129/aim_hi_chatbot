@@ -9,6 +9,7 @@ import {
   write_section,
   type Document,
   type DocumentTemplate,
+  type TemplateGuidance,
 } from "common";
 
 const NOW = "2026-11-06T00:00:00.000Z";
@@ -20,6 +21,11 @@ const TEMPLATE: DocumentTemplate = {
     { id: "aims", title: "Specific aims", required: true },
     { id: "notes", title: "Reviewer notes", required: false },
   ],
+};
+
+const GUIDANCE: TemplateGuidance = {
+  aims: "Numbered aims, each one sentence.",
+  notes: "Your own flags for the submitter.",
 };
 
 // A document with `aims` written by the user and `notes` by the assistant.
@@ -38,20 +44,26 @@ function written(): Document {
 }
 
 describe("render_document", () => {
-  it("marks every unwritten section, required ones as such", () => {
+  it("gives every section its guidance, and marks unwritten ones, required ones as such", () => {
     const empty = empty_document(TEMPLATE, [DocumentAuthor.ASSISTANT]);
-    assert.equal(render_document(TEMPLATE, empty), [
-      "### Specific aims (id: aims, required)\nNot written yet.",
-      "### Reviewer notes (id: notes)\nNot written yet.",
+    assert.equal(render_document(TEMPLATE, GUIDANCE, empty), [
+      "### Specific aims (id: aims, required)\n"
+        + "Belongs here: Numbered aims, each one sentence.\n"
+        + "Not written yet.",
+      "### Reviewer notes (id: notes)\n"
+        + "Belongs here: Your own flags for the submitter.\n"
+        + "Not written yet.",
     ].join("\n\n"));
   });
 
   it("gives each written section its status, author, time and text, in template order", () => {
-    assert.equal(render_document(TEMPLATE, written()), [
+    assert.equal(render_document(TEMPLATE, GUIDANCE, written()), [
       "### Specific aims (id: aims, required)\n"
+        + "Belongs here: Numbered aims, each one sentence.\n"
         + `Status: complete. Last written by the user, directly in the document at ${NOW}.\n\n`
         + "1. Measure X",
       "### Reviewer notes (id: notes)\n"
+        + "Belongs here: Your own flags for the submitter.\n"
         + `Status: draft. Last written by you at ${NOW}.\n\n`
         + "Consider exempt category 4.",
     ].join("\n\n"));
@@ -59,7 +71,7 @@ describe("render_document", () => {
 
   it("leaves out a section the template does not name", () => {
     const trimmed: DocumentTemplate = { ...TEMPLATE, sections: [TEMPLATE.sections[1]] };
-    const text = render_document(trimmed, written());
+    const text = render_document(trimmed, GUIDANCE, written());
     assert.doesNotMatch(text, /Specific aims/);
     assert.match(text, /^### Reviewer notes/);
   });
