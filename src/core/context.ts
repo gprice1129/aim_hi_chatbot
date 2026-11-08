@@ -7,19 +7,23 @@ export type {
   HistorySource,
   ProjectContextSource,
   ProjectContext,
+  DocumentContext,
   AssembleInput,
   AssembledContext,
 }
 
 import * as assert from "node:assert";
+import type { Document, DocumentTemplate, TemplateGuidance } from "common";
 
 import { Memory } from "#core/memory.js";
+import { render_document } from "#core/document.js";
 import { estimate_tokens, DEFAULT_CHARS_PER_TOKEN } from "#core/tokens.js";
 
 /*
  * ContextAssembler centralizes the policy for turning gathered context into a
  * prompt-safe shape: clamping untrusted, unbounded text and selecting replayed
- * history before any of it reaches the model.
+ * history before any of it reaches the model. A document being written in the
+ * chat is context too, rendered and clamped here like project instructions.
  *
  * Caps are token-based, measured with a deterministic local estimator
  * (core/tokens.ts)
@@ -67,11 +71,20 @@ interface ProjectContext {
   memory: Memory[];
 }
 
-// Input to assemble(): the bot's base prompt, the sources to pull from, and the live user turn.
+// The document being written in the chat, with what it takes to render it.
+interface DocumentContext {
+  template: DocumentTemplate;
+  guidance: TemplateGuidance;
+  document: Document;
+}
+
+// Input to assemble(): the bot's base prompt, the sources to pull from, the
+// document in hand, and the live user turn.
 interface AssembleInput {
   system_prompt: string;
   history?: HistorySource;
   project?: ProjectContextSource;
+  document?: DocumentContext;
   message?: Memory;
 }
 
@@ -163,6 +176,9 @@ class ContextAssembler {
    * The single max_total_context_tokens budget is filled by priority: the live
    * turn first, then recent history against what remains, then project memory
    * against what is still left.
+   *
+   * The system prompt is the base prompt, then the project instructions, then
+   * the document, which changes most often and so comes last.
    * Side Effect: awaits source I/O
    * Public
    */
@@ -174,6 +190,12 @@ class ContextAssembler {
       const clamped =
         _clamp(project.instructions, this._budget.max_instructions_tokens, "instructions");
       system = `${system}\n\n${_frame_instructions(clamped)}`;
+    }
+    if (undefined !== input.document) {
+      const { template, guidance, document } = input.document;
+      const clamped = _clamp(
+        render_document(template, guidance, document), this._budget.max_document_tokens, "document");
+      system = `${system}\n\n${_frame_document(template, clamped)}`;
     }
 
     const budget = this._budget.max_total_context_tokens;
@@ -216,6 +238,21 @@ function _frame_instructions(instructions: string): string {
     "above take precedence and the conflicting project instruction is ignored.",
     "",
     instructions,
+  ].join("\n");
+}
+
+/*
+ * (DocumentTemplate, string) => string
+ * Introduce the rendered document so the model knows what it is reading.
+ * Pure
+ * Private
+ */
+function _frame_document(template: DocumentTemplate, rendered: string): string {
+  return [
+    `The document being written in this conversation, "${template.title}", as it stands.`,
+    "Each section says where it stands and who last wrote it.",
+    "",
+    rendered,
   ].join("\n");
 }
 

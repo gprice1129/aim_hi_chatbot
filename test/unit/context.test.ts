@@ -8,7 +8,10 @@ import type {
   HistorySource,
   ProjectContextSource,
   ProjectContext,
+  DocumentContext,
 } from "#core/context.js";
+import { render_document } from "#core/document.js";
+import { DocumentAuthor, SectionStatus, empty_document, write_section } from "common";
 
 // Small explicit token budget so truncation/windowing boundaries are easy to
 // assert. The estimator is ceil(chars / 4), so 1 token == 4 chars; string
@@ -379,5 +382,63 @@ describe("ContextAssembler.assemble", () => {
     // budget keeps the live turn + history within a single cap.
     assert.ok(total_tokens(out.messages) <= budget);
     assert.ok(out.messages.length < history.length + 1); // some oldest dropped
+  });
+});
+
+// A one-section document with the section written by the user.
+function document_of(text: string): DocumentContext {
+  const template = {
+    id: "irb-test",
+    title: "Test Protocol",
+    sections: [{ id: "aims", title: "Specific aims", required: true }],
+  };
+  const written = write_section(template, empty_document(template, [DocumentAuthor.USER]), {
+    section_id: "aims", text, status: SectionStatus.DRAFT,
+    author: DocumentAuthor.USER, revision: 0,
+  }, "2026-11-06T00:00:00.000Z");
+  assert.ok(written.ok);
+  return { template, guidance: { aims: "The aims." }, document: written.value };
+}
+
+// Mirrors core's document frame, as assemble() appends it after what precedes.
+function with_document(before: string, rendered: string): string {
+  return [
+    before,
+    "",
+    'The document being written in this conversation, "Test Protocol", as it stands.',
+    "Each section says where it stands and who last wrote it.",
+    "",
+    rendered,
+  ].join("\n");
+}
+
+describe("ContextAssembler.assemble with a document", () => {
+  it("frames the rendered document and appends it last, after the project instructions", async () => {
+    const ctx = document_of("1. Measure X");
+    const out = await new ContextAssembler().assemble({
+      system_prompt: "BASE",
+      project: project_of({ instructions: "PROJECT RULES", memory: [] }),
+      document: ctx,
+    });
+    const rendered = render_document(ctx.template, ctx.guidance, ctx.document);
+    assert.equal(out.system, with_document(fenced("BASE", "PROJECT RULES"), rendered));
+    assert.ok(out.system.includes("Last written by the user, directly in the document"));
+    assert.deepEqual(out.messages, []);
+  });
+
+  it("leaves the system prompt untouched without a document", async () => {
+    const out = await new ContextAssembler().assemble({ system_prompt: "BASE" });
+    assert.equal(out.system, "BASE");
+  });
+
+  it("clamps an oversized document, keeping the head and noting truncation", async () => {
+    const out = await new ContextAssembler({ max_document_tokens: 8 }).assemble({
+      system_prompt: "BASE",
+      document: document_of("z".repeat(200)),
+    });
+    assert.ok(out.system.includes("truncated"));
+    assert.ok(out.system.includes("document exceeded 8 tokens"));
+    assert.ok(out.system.startsWith("BASE\n\nThe document being written"));
+    assert.equal((out.system.match(/z/g) ?? []).length, 0); // the head is all heading
   });
 });
