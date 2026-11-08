@@ -6,8 +6,25 @@ import { MockModel } from "#model/mock.js";
 import { ToolRegistry } from "#core/tool.js";
 import type { Tool } from "#core/tool.js";
 import type { Memory } from "#core/memory.js";
-import type { HistorySource, ProjectContextSource } from "#core/context.js";
+import type { DocumentContext, HistorySource, ProjectContextSource } from "#core/context.js";
+import { UpdateSectionTool } from "#tools/document.js";
+import { DocumentAuthor, empty_document, type DocumentTemplate } from "common";
 import { ALLY_PROMPTS, leaf } from "../support/prompts.ts";
+
+const TEMPLATE: DocumentTemplate = {
+  id: "irb-test",
+  title: "Test Protocol",
+  sections: [{ id: "aims", title: "Specific aims", required: true }],
+};
+
+// An empty document from TEMPLATE, as Ally reads it and as the tool writes it.
+function document_in_hand(): DocumentContext {
+  return {
+    template: TEMPLATE,
+    guidance: { aims: "The aims." },
+    document: empty_document(TEMPLATE, [DocumentAuthor.USER, DocumentAuthor.ASSISTANT]),
+  };
+}
 
 function history_of(...turns: Memory[]): HistorySource {
   return { load: async () => turns };
@@ -81,6 +98,35 @@ describe("Ally.respond (via MockModel)", () => {
     await make_ally(mock, ALLY_PROMPTS).respond(history_of(), no_project(), "hello");
 
     assert.equal(mock.calls()[0].opts.tools, undefined);
+  });
+
+  it("reads the document it is given each turn, and writes it through the tool it is offered", async () => {
+    const mock = new MockModel({
+      replies: [
+        { calls: [{ name: "update_section", input: { section_id: "aims", content: "1. Measure X" } }] },
+        "I've drafted the aims.",
+      ],
+    });
+    const context = document_in_hand();
+    const tool = new UpdateSectionTool(context.template, context.document);
+    const ally = make_ally(mock, ALLY_PROMPTS, new ToolRegistry([tool]), context);
+
+    const reply = await ally.respond(history_of(), no_project(), "We measure X.");
+
+    assert.deepEqual(reply, { ok: true, value: ["I've drafted the aims."] });
+    const system = mock.calls()[0].opts.system_prompt ?? "";
+    assert.ok(system.startsWith("You are Ally.\n\nBe general.\n\nThe document being written"));
+    assert.ok(system.includes("### Specific aims (id: aims, required)\nBelongs here: The aims.\nNot written yet."));
+    assert.equal(tool.document().sections["aims"].text, "1. Measure X");
+    assert.equal(tool.document().revision, 1);
+  });
+
+  it("composes no document when given none", async () => {
+    const mock = new MockModel({ reply: "ok" });
+
+    await make_ally(mock, ALLY_PROMPTS).respond(history_of(), no_project(), "hello");
+
+    assert.ok(!(mock.calls()[0].opts.system_prompt ?? "").includes("The document being written"));
   });
 });
 
