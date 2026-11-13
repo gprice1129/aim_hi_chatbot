@@ -13,7 +13,7 @@ export type {
 }
 
 import * as assert from "node:assert";
-import type { Document, DocumentTemplate, TemplateGuidance } from "common";
+import type { Document, DocumentTemplate } from "common";
 
 import { Memory } from "#core/memory.js";
 import { render_document } from "#core/document.js";
@@ -74,7 +74,6 @@ interface ProjectContext {
 // The document being written in the chat, with what it takes to render it.
 interface DocumentContext {
   template: DocumentTemplate;
-  guidance: TemplateGuidance;
   document: Document;
 }
 
@@ -192,9 +191,9 @@ class ContextAssembler {
       system = `${system}\n\n${_frame_instructions(clamped)}`;
     }
     if (undefined !== input.document) {
-      const { template, guidance, document } = input.document;
+      const { template, document } = input.document;
       const clamped = _clamp(
-        render_document(template, guidance, document), this._budget.max_document_tokens, "document");
+        render_document(template, document), this._budget.max_document_tokens, "document");
       system = `${system}\n\n${_frame_document(template, clamped)}`;
     }
 

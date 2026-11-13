@@ -9,7 +9,6 @@ import {
   write_section,
   type Document,
   type DocumentTemplate,
-  type TemplateGuidance,
 } from "common";
 
 const NOW = "2026-11-06T00:00:00.000Z";
@@ -18,14 +17,15 @@ const TEMPLATE: DocumentTemplate = {
   id: "irb-test",
   title: "Test Protocol",
   sections: [
-    { id: "aims", title: "Specific aims", required: true },
-    { id: "notes", title: "Reviewer notes", required: false },
+    {
+      metadata: { id: "aims", title: "Specific aims", required: true },
+      guidance: { model: "Numbered aims, each one sentence." },
+    },
+    {
+      metadata: { id: "notes", title: "Reviewer notes", required: false },
+      guidance: { model: "Your own flags for the submitter." },
+    },
   ],
-};
-
-const GUIDANCE: TemplateGuidance = {
-  aims: "Numbered aims, each one sentence.",
-  notes: "Your own flags for the submitter.",
 };
 
 // A document with `aims` written by the user and `notes` by the assistant.
@@ -46,7 +46,7 @@ function written(): Document {
 describe("render_document", () => {
   it("gives every section its guidance, and marks unwritten ones, required ones as such", () => {
     const empty = empty_document(TEMPLATE, [DocumentAuthor.ASSISTANT]);
-    assert.equal(render_document(TEMPLATE, GUIDANCE, empty), [
+    assert.equal(render_document(TEMPLATE, empty), [
       "### Specific aims (id: aims, required)\n"
         + "Belongs here: Numbered aims, each one sentence.\n"
         + "Not written yet.",
@@ -57,7 +57,7 @@ describe("render_document", () => {
   });
 
   it("gives each written section its status, author, time and text, in template order", () => {
-    assert.equal(render_document(TEMPLATE, GUIDANCE, written()), [
+    assert.equal(render_document(TEMPLATE, written()), [
       "### Specific aims (id: aims, required)\n"
         + "Belongs here: Numbered aims, each one sentence.\n"
         + `Status: complete. Last written by the user, directly in the document at ${NOW}.\n\n`
@@ -71,7 +71,7 @@ describe("render_document", () => {
 
   it("leaves out a section the template does not name", () => {
     const trimmed: DocumentTemplate = { ...TEMPLATE, sections: [TEMPLATE.sections[1]] };
-    const text = render_document(trimmed, GUIDANCE, written());
+    const text = render_document(trimmed, written());
     assert.doesNotMatch(text, /Specific aims/);
     assert.match(text, /^### Reviewer notes/);
   });

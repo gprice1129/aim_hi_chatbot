@@ -81,7 +81,7 @@ class UpdateSectionTool implements Tool {
         section_id: {
           type: ToolParamType.String,
           description: "Which section to write.",
-          choices: template.sections.map((section) => section.id),
+          choices: template.sections.map((section) => section.metadata.id),
         },
         content: {
           type: ToolParamType.String,
@@ -148,7 +148,7 @@ class UpdateSectionTool implements Tool {
       case DocumentWriteError.NOT_PERMITTED:
         return "This document is not yours to write. Tell the user what you would change.";
       case DocumentWriteError.NO_SUCH_SECTION: {
-        const known = this._template.sections.map((section) => section.id).join(", ");
+        const known = this._template.sections.map((section) => section.metadata.id).join(", ");
         return `Unknown section '${section_id}'. Sections: ${known}`;
       }
       case DocumentWriteError.STALE:

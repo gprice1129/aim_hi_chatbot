@@ -19,14 +19,16 @@ const OPENING_PROMPTS = branch("Ally", "You are Ally.\n\n{mode}", {
 const TEMPLATE: DocumentTemplate = {
   id: "irb-test",
   title: "Test Protocol",
-  sections: [{ id: "aims", title: "Specific aims", required: true }],
+  sections: [{
+    metadata: { id: "aims", title: "Specific aims", required: true },
+    guidance: { model: "The aims." },
+  }],
 };
 
 // An empty document from TEMPLATE, as Ally reads it and as the tool writes it.
 function document_in_hand(): DocumentContext {
   return {
     template: TEMPLATE,
-    guidance: { aims: "The aims." },
     document: empty_document(TEMPLATE, [DocumentAuthor.USER, DocumentAuthor.ASSISTANT]),
   };
 }

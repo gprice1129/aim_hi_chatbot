@@ -390,14 +390,17 @@ function document_of(text: string): DocumentContext {
   const template = {
     id: "irb-test",
     title: "Test Protocol",
-    sections: [{ id: "aims", title: "Specific aims", required: true }],
+    sections: [{
+      metadata: { id: "aims", title: "Specific aims", required: true },
+      guidance: { model: "The aims." },
+    }],
   };
   const written = write_section(template, empty_document(template, [DocumentAuthor.USER]), {
     section_id: "aims", text, status: SectionStatus.DRAFT,
     author: DocumentAuthor.USER, revision: 0,
   }, "2026-11-06T00:00:00.000Z");
   assert.ok(written.ok);
-  return { template, guidance: { aims: "The aims." }, document: written.value };
+  return { template, document: written.value };
 }
 
 // Mirrors core's document frame, as assemble() appends it after what precedes.
@@ -420,7 +423,7 @@ describe("ContextAssembler.assemble with a document", () => {
       project: project_of({ instructions: "PROJECT RULES", memory: [] }),
       document: ctx,
     });
-    const rendered = render_document(ctx.template, ctx.guidance, ctx.document);
+    const rendered = render_document(ctx.template, ctx.document);
     assert.equal(out.system, with_document(fenced("BASE", "PROJECT RULES"), rendered));
     assert.ok(out.system.includes("Last written by the user, directly in the document"));
     assert.deepEqual(out.messages, []);

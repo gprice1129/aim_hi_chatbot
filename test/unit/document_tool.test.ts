@@ -14,8 +14,14 @@ const TEMPLATE: DocumentTemplate = {
   id: "irb-test",
   title: "Test Protocol",
   sections: [
-    { id: "aims", title: "Specific aims", required: true },
-    { id: "notes", title: "Reviewer notes", required: false },
+    {
+      metadata: { id: "aims", title: "Specific aims", required: true },
+      guidance: { model: "The aims." },
+    },
+    {
+      metadata: { id: "notes", title: "Reviewer notes", required: false },
+      guidance: { model: "The notes." },
+    },
   ],
 };
 
