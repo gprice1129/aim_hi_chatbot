@@ -14,6 +14,7 @@ import {
   DocumentAuthor,
   DocumentWriteError,
   SectionStatus,
+  iso_now,
   write_section,
   type Document,
   type DocumentTemplate,
@@ -61,7 +62,7 @@ class UpdateSectionTool implements Tool {
   constructor(
       template: DocumentTemplate,
       document: Document,
-      now: () => string = () => new Date().toISOString()) {
+      now: () => string = iso_now) {
     this._template = template;
     this._document = document;
     this._now = now;
