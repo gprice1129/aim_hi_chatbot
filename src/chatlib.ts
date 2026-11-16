@@ -43,6 +43,10 @@ export {
 } from "#tools/knowledge_graph.js";
 
 export {
+  UpdateSectionTool,
+} from "#tools/document.js";
+
+export {
   BotFailure,
 } from "#core/result.js";
 
